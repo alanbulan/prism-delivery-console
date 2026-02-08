@@ -59,9 +59,29 @@ pub fn run() {
             commands::db_crud::db_delete_client,
             commands::db_crud::db_create_build_record,
             commands::db_crud::db_list_build_records,
+            commands::db_crud::db_delete_build_record,
+            commands::db_crud::db_delete_all_build_records,
+            commands::db_crud::db_delete_build_records_before_days,
             // 设置 commands
             commands::db_crud::get_app_settings,
+            commands::db_crud::get_app_setting,
             commands::db_crud::save_app_setting,
+            // 客户模块配置 commands
+            commands::db_crud::db_save_client_modules,
+            commands::db_crud::db_load_client_modules,
+            // 构建版本号 commands
+            commands::db_crud::db_get_next_version,
+            commands::db_crud::db_get_last_build_modules,
+            // 项目分析 commands
+            commands::analysis::get_llm_config,
+            commands::analysis::list_llm_models,
+            commands::analysis::scan_project_file_index,
+            commands::analysis::analyze_file_summary,
+            commands::analysis::analyze_dependencies,
+            commands::analysis::embed_file,
+            commands::analysis::embed_all_files,
+            commands::analysis::search_similar_files,
+            commands::analysis::get_project_overview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

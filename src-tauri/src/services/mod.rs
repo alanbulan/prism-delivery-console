@@ -4,7 +4,10 @@
 // ⛔ 禁止：直接返回前端专用的错误格式
 // ============================================================================
 
+pub mod analyzer;
 pub mod build_strategy;
+pub mod llm_client;
+pub mod module_rewriter;
 pub mod packer;
 pub mod scan_strategy;
 pub mod scanner;

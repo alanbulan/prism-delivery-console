@@ -57,6 +57,8 @@ export interface Project {
   repo_path: string;
   /** 技术栈类型（如 fastapi, vue3） */
   tech_stack_type: string;
+  /** 模块扫描目录（相对于 repo_path，如 "modules"、"src/views"） */
+  modules_dir: string;
   /** 创建时间 */
   created_at: string;
   /** 更新时间 */
@@ -85,6 +87,10 @@ export interface BuildRecord {
   selected_modules: string;
   /** 构建输出路径 */
   output_path: string;
+  /** 构建版本号（如 v1.0.0） */
+  version: string;
+  /** 变更日志（与上次构建的模块差异，可为 null） */
+  changelog: string | null;
   /** 创建时间 */
   created_at: string;
 }
@@ -97,5 +103,105 @@ export interface AppSettings {
   db_path: string;
 }
 
+/** LLM API 配置 */
+export interface LlmConfig {
+  /** OpenAI 兼容 API 基础地址（如 http://localhost:11434/v1） */
+  base_url: string;
+  /** API Key */
+  api_key: string;
+  /** 模型名称 */
+  model_name: string;
+  /** Embedding 模型名称 */
+  embedding_model: string;
+}
+
+/** LLM 模型信息（从 /v1/models 获取） */
+export interface LlmModel {
+  /** 模型 ID */
+  id: string;
+}
+
 /** 页面导航标识 */
-export type PageId = 'projects' | 'build' | 'quick-build' | 'settings' | 'about';
+export type PageId = 'projects' | 'build' | 'analysis' | 'settings' | 'about';
+
+/** 文件索引条目（由 scan_project_file_index 返回） */
+export interface FileIndexEntry {
+  /** 相对路径 */
+  relative_path: string;
+  /** SHA256 哈希 */
+  file_hash: string;
+  /** 是否有变更（与数据库中的哈希不同） */
+  changed: boolean;
+  /** LLM 生成的文件摘要（可为空） */
+  summary: string | null;
+}
+
+/** 依赖边 */
+export interface DepEdge {
+  /** 源文件相对路径 */
+  source: string;
+  /** 目标文件相对路径 */
+  target: string;
+}
+
+/** 依赖图数据（由 analyze_dependencies 返回） */
+export interface DependencyGraph {
+  /** 所有文件节点（相对路径） */
+  nodes: string[];
+  /** 依赖边列表 */
+  edges: DepEdge[];
+}
+
+/** 语义搜索结果条目（由 search_similar_files 返回） */
+export interface SimilarFile {
+  /** 文件相对路径 */
+  relative_path: string;
+  /** 文件摘要 */
+  summary: string | null;
+  /** 余弦相似度分数 */
+  score: number;
+}
+
+/** 批量 Embedding 结果（由 embed_all_files 返回） */
+export interface EmbedBatchResult {
+  /** 总文件数 */
+  total: number;
+  /** 成功数 */
+  success: number;
+  /** 失败数 */
+  failed: number;
+}
+
+/** 语言统计条目（由 get_project_overview 返回） */
+export interface LanguageStat {
+  /** 语言名称 */
+  language: string;
+  /** 文件数量 */
+  file_count: number;
+  /** 总行数 */
+  line_count: number;
+}
+
+/** 项目概览数据（由 get_project_overview 返回） */
+export interface ProjectOverview {
+  /** 总文件数 */
+  total_files: number;
+  /** 总代码行数 */
+  total_lines: number;
+  /** 总目录数 */
+  total_dirs: number;
+  /** 检测到的技术栈标签 */
+  tech_stack: string[];
+  /** 按语言分类的文件统计 */
+  languages: LanguageStat[];
+  /** 入口文件列表 */
+  entry_files: string[];
+}
+
+/** 签名索引结果（由 index_project_signatures 返回） */
+export interface IndexSignaturesResult {
+  /** 总文件数 */
+  total: number;
+  /** 成功提取签名的文件数 */
+  indexed: number;
+}
