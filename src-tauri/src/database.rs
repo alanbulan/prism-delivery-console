@@ -28,6 +28,8 @@ pub struct Project {
     pub category_id: i64,
     pub repo_path: String,
     pub tech_stack_type: String,
+    /// 模块扫描目录（相对于 repo_path，如 "modules"、"api"、"src/views"）
+    pub modules_dir: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,6 +51,10 @@ pub struct BuildRecord {
     /// JSON 数组格式的模块列表
     pub selected_modules: String,
     pub output_path: String,
+    /// 构建版本号（如 v1.0.0, v1.0.1）
+    pub version: String,
+    /// 变更日志（与上次构建的模块差异）
+    pub changelog: Option<String>,
     pub created_at: String,
 }
 
@@ -105,6 +111,9 @@ impl Database {
         // 创建所有必要的表
         Self::create_tables(&conn)?;
 
+        // 数据库迁移：为旧版数据库补充缺失的列
+        Self::migrate(&conn)?;
+
         Ok(Database { conn })
     }
 
@@ -130,6 +139,7 @@ impl Database {
                 category_id INTEGER NOT NULL,
                 repo_path TEXT NOT NULL,
                 tech_stack_type TEXT NOT NULL DEFAULT 'fastapi',
+                modules_dir TEXT NOT NULL DEFAULT 'modules',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -158,9 +168,23 @@ impl Database {
                 client_id INTEGER NOT NULL,
                 selected_modules TEXT NOT NULL,
                 output_path TEXT NOT NULL,
+                version TEXT NOT NULL DEFAULT 'v1.0.0',
+                changelog TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (client_id) REFERENCES clients(id)
+            );
+
+            -- 客户模块配置表（记忆每个客户在每个项目下选择的模块）
+            CREATE TABLE IF NOT EXISTS client_module_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                modules_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(client_id, project_id),
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
             -- 设置表（键值对）
@@ -168,9 +192,181 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            -- 文件索引表（项目分析用，记录每个文件的哈希用于增量检测）
+            CREATE TABLE IF NOT EXISTS file_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                file_hash TEXT NOT NULL,
+                summary TEXT,
+                signatures TEXT,
+                embedding BLOB,
+                last_analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_id, file_path),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
             ",
         )
         .map_err(|e| format!("数据库初始化失败：创建表结构时出错: {}", e))?;
+
+        Ok(())
+    }
+
+    /// 数据库迁移：为旧版数据库补充缺失的列
+    /// 使用 PRAGMA table_info 检测列是否存在，不存在则 ALTER TABLE 添加
+    fn migrate(conn: &Connection) -> Result<(), String> {
+        // 检查 projects 表是否缺少 modules_dir 列
+        let has_modules_dir: bool = conn
+            .prepare("PRAGMA table_info(projects)")
+            .and_then(|mut stmt| {
+                let cols: Vec<String> = stmt
+                    .query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect();
+                Ok(cols.contains(&"modules_dir".to_string()))
+            })
+            .unwrap_or(false);
+
+        if !has_modules_dir {
+            conn.execute_batch(
+                "ALTER TABLE projects ADD COLUMN modules_dir TEXT NOT NULL DEFAULT 'modules';",
+            )
+            .map_err(|e| format!("数据库迁移失败：添加 modules_dir 列时出错: {}", e))?;
+        }
+
+        // 检查 client_module_configs 表是否存在，不存在则创建
+        let has_config_table: bool = conn
+            .prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='client_module_configs'")
+            .and_then(|mut stmt| {
+                let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap_or(0);
+                Ok(count > 0)
+            })
+            .unwrap_or(false);
+
+        if !has_config_table {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS client_module_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    client_id INTEGER NOT NULL,
+                    project_id INTEGER NOT NULL,
+                    modules_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(client_id, project_id),
+                    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );",
+            )
+            .map_err(|e| format!("数据库迁移失败：创建 client_module_configs 表时出错: {}", e))?;
+        }
+
+        // 检查 build_records 表是否缺少 version 列
+        let has_version: bool = conn
+            .prepare("PRAGMA table_info(build_records)")
+            .and_then(|mut stmt| {
+                let cols: Vec<String> = stmt
+                    .query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect();
+                Ok(cols.contains(&"version".to_string()))
+            })
+            .unwrap_or(false);
+
+        if !has_version {
+            conn.execute_batch(
+                "ALTER TABLE build_records ADD COLUMN version TEXT NOT NULL DEFAULT 'v1.0.0';
+                 ALTER TABLE build_records ADD COLUMN changelog TEXT;",
+            )
+            .map_err(|e| format!("数据库迁移失败：添加 version/changelog 列时出错: {}", e))?;
+        }
+
+        // 检查 file_index 表是否存在，不存在则创建（项目分析功能）
+        let has_file_index: bool = conn
+            .prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='file_index'")
+            .and_then(|mut stmt| {
+                let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap_or(0);
+                Ok(count > 0)
+            })
+            .unwrap_or(false);
+
+        if !has_file_index {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS file_index (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    last_analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, file_path),
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );",
+            )
+            .map_err(|e| format!("数据库迁移失败：创建 file_index 表时出错: {}", e))?;
+        }
+
+        // 检查 file_index 表是否缺少 summary 列
+        if has_file_index {
+            let has_summary: bool = conn
+                .prepare("PRAGMA table_info(file_index)")
+                .and_then(|mut stmt| {
+                    let cols: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(cols.contains(&"summary".to_string()))
+                })
+                .unwrap_or(false);
+
+            if !has_summary {
+                conn.execute_batch(
+                    "ALTER TABLE file_index ADD COLUMN summary TEXT;",
+                )
+                .map_err(|e| format!("数据库迁移失败：添加 summary 列时出错: {}", e))?;
+            }
+
+            // 检查 file_index 表是否缺少 embedding 列（向量搜索用）
+            let has_embedding: bool = conn
+                .prepare("PRAGMA table_info(file_index)")
+                .and_then(|mut stmt| {
+                    let cols: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(cols.contains(&"embedding".to_string()))
+                })
+                .unwrap_or(false);
+
+            if !has_embedding {
+                conn.execute_batch(
+                    "ALTER TABLE file_index ADD COLUMN embedding BLOB;",
+                )
+                .map_err(|e| format!("数据库迁移失败：添加 embedding 列时出错: {}", e))?;
+            }
+
+            // 检查 file_index 表是否缺少 signatures 列（静态签名提取用）
+            let has_signatures: bool = conn
+                .prepare("PRAGMA table_info(file_index)")
+                .and_then(|mut stmt| {
+                    let cols: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(cols.contains(&"signatures".to_string()))
+                })
+                .unwrap_or(false);
+
+            if !has_signatures {
+                conn.execute_batch(
+                    "ALTER TABLE file_index ADD COLUMN signatures TEXT;",
+                )
+                .map_err(|e| format!("数据库迁移失败：添加 signatures 列时出错: {}", e))?;
+            }
+        }
 
         Ok(())
     }
@@ -359,17 +555,23 @@ impl Database {
         category_id: i64,
         repo_path: &str,
         tech_stack: &str,
+        modules_dir: &str,
     ) -> Result<Project, String> {
         // 检查仓库路径是否存在于文件系统
         if !std::path::Path::new(repo_path).exists() {
             return Err(format!("项目路径不存在：{}", repo_path));
         }
 
-        // 插入项目记录
+        // 插入项目记录，空字符串时使用数据库默认值
+        let effective_modules_dir = if modules_dir.is_empty() {
+            "modules"
+        } else {
+            modules_dir
+        };
         self.conn
             .execute(
-                "INSERT INTO projects (name, category_id, repo_path, tech_stack_type) VALUES (?1, ?2, ?3, ?4)",
-                params![name, category_id, repo_path, tech_stack],
+                "INSERT INTO projects (name, category_id, repo_path, tech_stack_type, modules_dir) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![name, category_id, repo_path, tech_stack, effective_modules_dir],
             )
             .map_err(|e| format!("创建项目失败：{}", e))?;
 
@@ -377,7 +579,7 @@ impl Database {
         let id = self.conn.last_insert_rowid();
         self.conn
             .query_row(
-                "SELECT id, name, category_id, repo_path, tech_stack_type, created_at, updated_at FROM projects WHERE id = ?1",
+                "SELECT id, name, category_id, repo_path, tech_stack_type, modules_dir, created_at, updated_at FROM projects WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(Project {
@@ -386,8 +588,9 @@ impl Database {
                         category_id: row.get(2)?,
                         repo_path: row.get(3)?,
                         tech_stack_type: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
+                        modules_dir: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
                     })
                 },
             )
@@ -402,7 +605,7 @@ impl Database {
     pub fn list_projects(&self) -> Result<Vec<Project>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, category_id, repo_path, tech_stack_type, created_at, updated_at FROM projects ORDER BY id")
+            .prepare("SELECT id, name, category_id, repo_path, tech_stack_type, modules_dir, created_at, updated_at FROM projects ORDER BY id")
             .map_err(|e| format!("查询项目失败：{}", e))?;
 
         let projects = stmt
@@ -413,8 +616,9 @@ impl Database {
                     category_id: row.get(2)?,
                     repo_path: row.get(3)?,
                     tech_stack_type: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
+                    modules_dir: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             })
             .map_err(|e| format!("查询项目失败：{}", e))?
@@ -435,7 +639,7 @@ impl Database {
     pub fn get_project(&self, id: i64) -> Result<Project, String> {
         self.conn
             .query_row(
-                "SELECT id, name, category_id, repo_path, tech_stack_type, created_at, updated_at FROM projects WHERE id = ?1",
+                "SELECT id, name, category_id, repo_path, tech_stack_type, modules_dir, created_at, updated_at FROM projects WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(Project {
@@ -444,8 +648,9 @@ impl Database {
                         category_id: row.get(2)?,
                         repo_path: row.get(3)?,
                         tech_stack_type: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
+                        modules_dir: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
                     })
                 },
             )
@@ -476,13 +681,27 @@ impl Database {
         id: i64,
         name: &str,
         category_id: i64,
+        repo_path: &str,
         tech_stack: &str,
+        modules_dir: &str,
     ) -> Result<(), String> {
+        // 检查仓库路径是否存在于文件系统
+        if !std::path::Path::new(repo_path).exists() {
+            return Err(format!("项目路径不存在：{}", repo_path));
+        }
+
+        // 空字符串时使用默认值
+        let effective_modules_dir = if modules_dir.is_empty() {
+            "modules"
+        } else {
+            modules_dir
+        };
+
         let rows_affected = self
             .conn
             .execute(
-                "UPDATE projects SET name = ?1, category_id = ?2, tech_stack_type = ?3, updated_at = datetime('now') WHERE id = ?4",
-                params![name, category_id, tech_stack, id],
+                "UPDATE projects SET name = ?1, category_id = ?2, repo_path = ?3, tech_stack_type = ?4, modules_dir = ?5, updated_at = datetime('now') WHERE id = ?6",
+                params![name, category_id, repo_path, tech_stack, effective_modules_dir, id],
             )
             .map_err(|e| format!("更新项目失败：{}", e))?;
 
@@ -675,11 +894,13 @@ impl Database {
         client_id: i64,
         modules_json: &str,
         output_path: &str,
+        version: &str,
+        changelog: Option<&str>,
     ) -> Result<BuildRecord, String> {
         self.conn
             .execute(
-                "INSERT INTO build_records (project_id, client_id, selected_modules, output_path) VALUES (?1, ?2, ?3, ?4)",
-                params![project_id, client_id, modules_json, output_path],
+                "INSERT INTO build_records (project_id, client_id, selected_modules, output_path, version, changelog) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![project_id, client_id, modules_json, output_path, version, changelog],
             )
             .map_err(|e| format!("创建构建记录失败：{}", e))?;
 
@@ -688,7 +909,7 @@ impl Database {
         // 查询刚插入的记录以获取完整字段（包括 created_at 默认值）
         self.conn
             .query_row(
-                "SELECT id, project_id, client_id, selected_modules, output_path, created_at FROM build_records WHERE id = ?1",
+                "SELECT id, project_id, client_id, selected_modules, output_path, version, changelog, created_at FROM build_records WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(BuildRecord {
@@ -697,7 +918,9 @@ impl Database {
                         client_id: row.get(2)?,
                         selected_modules: row.get(3)?,
                         output_path: row.get(4)?,
-                        created_at: row.get(5)?,
+                        version: row.get(5)?,
+                        changelog: row.get(6)?,
+                        created_at: row.get(7)?,
                     })
                 },
             )
@@ -721,7 +944,7 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, project_id, client_id, selected_modules, output_path, created_at FROM build_records WHERE project_id = ?1 ORDER BY created_at DESC, id DESC",
+                "SELECT id, project_id, client_id, selected_modules, output_path, version, changelog, created_at FROM build_records WHERE project_id = ?1 ORDER BY created_at DESC, id DESC",
             )
             .map_err(|e| format!("查询构建记录失败：{}", e))?;
 
@@ -733,7 +956,9 @@ impl Database {
                     client_id: row.get(2)?,
                     selected_modules: row.get(3)?,
                     output_path: row.get(4)?,
-                    created_at: row.get(5)?,
+                    version: row.get(5)?,
+                    changelog: row.get(6)?,
+                    created_at: row.get(7)?,
                 })
             })
             .map_err(|e| format!("查询构建记录失败：{}", e))?;
@@ -741,6 +966,114 @@ impl Database {
         records
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("读取构建记录失败：{}", e))
+    }
+
+    /// 根据 ID 列表查询构建记录（用于删除前获取文件路径）
+    pub fn list_build_records_by_ids(&self, ids: &[i64]) -> Result<Vec<BuildRecord>, String> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        // 动态构建 IN 子句的占位符
+        let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "SELECT id, project_id, client_id, selected_modules, output_path, version, changelog, created_at FROM build_records WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(|e| format!("查询构建记录失败：{}", e))?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let records = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok(BuildRecord {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    client_id: row.get(2)?,
+                    selected_modules: row.get(3)?,
+                    output_path: row.get(4)?,
+                    version: row.get(5)?,
+                    changelog: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("查询构建记录失败：{}", e))?;
+        records.collect::<Result<Vec<_>, _>>().map_err(|e| format!("读取构建记录失败：{}", e))
+    }
+
+    /// 查询指定项目中 N 天前的构建记录（用于删除前获取文件路径）
+    pub fn list_build_records_before_days(&self, project_id: i64, days: i64) -> Result<Vec<BuildRecord>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_id, client_id, selected_modules, output_path, version, changelog, created_at FROM build_records WHERE project_id = ?1 AND created_at < datetime('now', ?2) ORDER BY created_at DESC",
+            )
+            .map_err(|e| format!("查询构建记录失败：{}", e))?;
+        let records = stmt
+            .query_map(params![project_id, format!("-{} days", days)], |row| {
+                Ok(BuildRecord {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    client_id: row.get(2)?,
+                    selected_modules: row.get(3)?,
+                    output_path: row.get(4)?,
+                    version: row.get(5)?,
+                    changelog: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("查询构建记录失败：{}", e))?;
+        records.collect::<Result<Vec<_>, _>>().map_err(|e| format!("读取构建记录失败：{}", e))
+    }
+
+    /// 删除单条构建记录
+    ///
+    /// # 参数
+    /// - `id`: 构建记录 ID
+    pub fn delete_build_record(&self, id: i64) -> Result<(), String> {
+        let affected = self
+            .conn
+            .execute("DELETE FROM build_records WHERE id = ?1", params![id])
+            .map_err(|e| format!("删除构建记录失败：{}", e))?;
+
+        if affected == 0 {
+            return Err(format!("构建记录不存在：id={}", id));
+        }
+        Ok(())
+    }
+
+    /// 删除指定项目的所有构建记录
+    ///
+    /// # 返回
+    /// - `Ok(u64)`: 删除的记录数
+    pub fn delete_all_build_records(&self, project_id: i64) -> Result<u64, String> {
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM build_records WHERE project_id = ?1",
+                params![project_id],
+            )
+            .map_err(|e| format!("清空构建记录失败：{}", e))?;
+
+        Ok(affected as u64)
+    }
+
+    /// 删除指定项目中 N 天前的构建记录
+    ///
+    /// # 参数
+    /// - `project_id`: 项目 ID
+    /// - `days`: 保留最近 N 天的记录，删除更早的
+    pub fn delete_build_records_before_days(
+        &self,
+        project_id: i64,
+        days: i64,
+    ) -> Result<u64, String> {
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM build_records WHERE project_id = ?1 AND created_at < datetime('now', ?2)",
+                params![project_id, format!("-{} days", days)],
+            )
+            .map_err(|e| format!("清洗构建记录失败：{}", e))?;
+
+        Ok(affected as u64)
     }
 
     // ========================================================================
@@ -776,6 +1109,26 @@ impl Database {
         })
     }
 
+    /// 读取单个设置项的值
+    ///
+    /// # 参数
+    /// - `key`: 设置键名
+    ///
+    /// # 返回
+    /// - `Ok(Some(value))`: 键存在，返回对应值
+    /// - `Ok(None)`: 键不存在
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(value)
+    }
+
     /// 保存单个设置项（键值对）
     ///
     /// 使用 INSERT OR REPLACE 实现 upsert 语义：
@@ -798,6 +1151,111 @@ impl Database {
             .map_err(|e| format!("保存设置失败：{}", e))?;
 
         Ok(())
+    }
+
+    // ========================================================================
+    // 构建版本号与变更日志
+    // ========================================================================
+
+    /// 获取下一个构建版本号（基于 client_id + project_id 自增）
+    ///
+    /// 版本格式：v1.0.N（N 从 0 开始递增）
+    /// 如果该客户在该项目下无历史记录，返回 "v1.0.0"
+    pub fn get_next_version(&self, client_id: i64, project_id: i64) -> Result<String, String> {
+        let last_version: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT version FROM build_records WHERE client_id = ?1 AND project_id = ?2 ORDER BY id DESC LIMIT 1",
+                params![client_id, project_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let next = match last_version {
+            Some(v) => {
+                // 解析 "v1.0.N" 中的 N 并递增
+                let patch: u32 = v
+                    .trim_start_matches('v')
+                    .rsplit('.')
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                format!("v1.0.{}", patch + 1)
+            }
+            None => "v1.0.0".to_string(),
+        };
+
+        Ok(next)
+    }
+
+    /// 获取该客户在该项目下最近一次构建的模块列表（JSON 字符串）
+    pub fn get_last_build_modules(
+        &self,
+        client_id: i64,
+        project_id: i64,
+    ) -> Result<Option<String>, String> {
+        let result = self.conn.query_row(
+            "SELECT selected_modules FROM build_records WHERE client_id = ?1 AND project_id = ?2 ORDER BY id DESC LIMIT 1",
+            params![client_id, project_id],
+            |row| row.get::<_, String>(0),
+        );
+
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("查询上次构建模块失败：{}", e)),
+        }
+    }
+
+    // ========================================================================
+    // 客户模块配置 CRUD（记忆每个客户在每个项目下选择的模块）
+    // ========================================================================
+
+    /// 保存客户模块配置（UPSERT：存在则更新，不存在则插入）
+    ///
+    /// # 参数
+    /// - `client_id`: 客户 ID
+    /// - `project_id`: 项目 ID
+    /// - `modules_json`: 模块列表的 JSON 字符串（如 `["mod_a","mod_b"]`）
+    pub fn save_client_module_config(
+        &self,
+        client_id: i64,
+        project_id: i64,
+        modules_json: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO client_module_configs (client_id, project_id, modules_json, updated_at)
+                 VALUES (?1, ?2, ?3, datetime('now'))
+                 ON CONFLICT(client_id, project_id)
+                 DO UPDATE SET modules_json = excluded.modules_json, updated_at = datetime('now')",
+                params![client_id, project_id, modules_json],
+            )
+            .map_err(|e| format!("保存客户模块配置失败：{}", e))?;
+        Ok(())
+    }
+
+    /// 加载客户模块配置
+    ///
+    /// # 返回
+    /// - `Ok(Some(json))`: 找到配置，返回模块 JSON 字符串
+    /// - `Ok(None)`: 该客户在该项目下无配置
+    pub fn load_client_module_config(
+        &self,
+        client_id: i64,
+        project_id: i64,
+    ) -> Result<Option<String>, String> {
+        let result = self.conn.query_row(
+            "SELECT modules_json FROM client_module_configs WHERE client_id = ?1 AND project_id = ?2",
+            params![client_id, project_id],
+            |row| row.get::<_, String>(0),
+        );
+
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("加载客户模块配置失败：{}", e)),
+        }
     }
 }
 
@@ -831,13 +1289,15 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
 
-        assert_eq!(table_names.len(), 6);
+        assert_eq!(table_names.len(), 8);
         assert!(table_names.contains(&"categories".to_string()));
         assert!(table_names.contains(&"projects".to_string()));
         assert!(table_names.contains(&"clients".to_string()));
         assert!(table_names.contains(&"project_clients".to_string()));
         assert!(table_names.contains(&"build_records".to_string()));
         assert!(table_names.contains(&"settings".to_string()));
+        assert!(table_names.contains(&"client_module_configs".to_string()));
+        assert!(table_names.contains(&"file_index".to_string()));
     }
 
     /// 测试数据库初始化：外键约束已启用
@@ -873,7 +1333,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 8);
     }
 
     /// 测试数据库初始化：自动创建不存在的目录
@@ -896,7 +1356,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 8);
     }
 
     /// 测试 categories 表结构：验证列定义
@@ -1316,7 +1776,7 @@ mod tests {
         let repo_dir = TempDir::new().unwrap();
         let repo_path = repo_dir.path().to_str().unwrap().to_string();
         let project = db
-            .create_project("测试项目", cat.id, &repo_path, "fastapi")
+            .create_project("测试项目", cat.id, &repo_path, "fastapi", "")
             .unwrap();
 
         // 创建客户并关联到项目
@@ -1336,7 +1796,7 @@ mod tests {
         let output_path = "/tmp/output/test.zip";
 
         let record = db
-            .create_build_record(project_id, client_id, modules_json, output_path)
+            .create_build_record(project_id, client_id, modules_json, output_path, "v1.0.0", None)
             .unwrap();
 
         assert!(record.id > 0);
@@ -1344,6 +1804,7 @@ mod tests {
         assert_eq!(record.client_id, client_id);
         assert_eq!(record.selected_modules, modules_json);
         assert_eq!(record.output_path, output_path);
+        assert_eq!(record.version, "v1.0.0");
         assert!(!record.created_at.is_empty());
     }
 
@@ -1354,7 +1815,7 @@ mod tests {
 
         let modules_json = r#"["auth","users","orders"]"#;
         let record = db
-            .create_build_record(project_id, client_id, modules_json, "/tmp/out.zip")
+            .create_build_record(project_id, client_id, modules_json, "/tmp/out.zip", "v1.0.0", None)
             .unwrap();
 
         // 验证 JSON 字符串原样存储和读取
@@ -1368,10 +1829,10 @@ mod tests {
 
         // 创建多条构建记录
         let r1 = db
-            .create_build_record(project_id, client_id, r#"["mod_a"]"#, "/tmp/out1.zip")
+            .create_build_record(project_id, client_id, r#"["mod_a"]"#, "/tmp/out1.zip", "v1.0.0", None)
             .unwrap();
         let r2 = db
-            .create_build_record(project_id, client_id, r#"["mod_b"]"#, "/tmp/out2.zip")
+            .create_build_record(project_id, client_id, r#"["mod_b"]"#, "/tmp/out2.zip", "v1.0.0", None)
             .unwrap();
 
         let records = db.list_build_records_by_project(project_id).unwrap();
@@ -1409,10 +1870,11 @@ mod tests {
                 cat.id,
                 repo_dir_a.path().to_str().unwrap(),
                 "fastapi",
+                "",
             )
             .unwrap();
         let project_b = db
-            .create_project("项目B", cat.id, repo_dir_b.path().to_str().unwrap(), "vue3")
+            .create_project("项目B", cat.id, repo_dir_b.path().to_str().unwrap(), "vue3", "")
             .unwrap();
 
         // 创建客户
@@ -1421,13 +1883,13 @@ mod tests {
             .unwrap();
 
         // 为项目 A 创建 2 条记录
-        db.create_build_record(project_a.id, client.id, r#"["a1"]"#, "/tmp/a1.zip")
+        db.create_build_record(project_a.id, client.id, r#"["a1"]"#, "/tmp/a1.zip", "v1.0.0", None)
             .unwrap();
-        db.create_build_record(project_a.id, client.id, r#"["a2"]"#, "/tmp/a2.zip")
+        db.create_build_record(project_a.id, client.id, r#"["a2"]"#, "/tmp/a2.zip", "v1.0.0", None)
             .unwrap();
 
         // 为项目 B 创建 1 条记录
-        db.create_build_record(project_b.id, client.id, r#"["b1"]"#, "/tmp/b1.zip")
+        db.create_build_record(project_b.id, client.id, r#"["b1"]"#, "/tmp/b1.zip", "v1.0.0", None)
             .unwrap();
 
         // 查询项目 A 的记录
@@ -1535,7 +1997,7 @@ mod tests {
         let repo_path = repo_dir.path().to_str().unwrap();
 
         let project = db
-            .create_project("测试项目", cat.id, repo_path, "fastapi")
+            .create_project("测试项目", cat.id, repo_path, "fastapi", "")
             .unwrap();
         assert!(project.id > 0);
         assert_eq!(project.name, "测试项目");
@@ -1556,7 +2018,7 @@ mod tests {
 
         let fake_path = "/this/path/does/not/exist/at/all";
         let err = db
-            .create_project("项目X", cat.id, fake_path, "vue3")
+            .create_project("项目X", cat.id, fake_path, "vue3", "")
             .unwrap_err();
         assert_eq!(err, format!("项目路径不存在：{}", fake_path));
     }
@@ -1576,9 +2038,9 @@ mod tests {
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
 
-        db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+        db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
-        db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+        db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3", "")
             .unwrap();
 
         let projects = db.list_projects().unwrap();
@@ -1600,7 +2062,7 @@ mod tests {
         let repo_path = repo.path().to_str().unwrap();
 
         let created = db
-            .create_project("我的项目", cat.id, repo_path, "fastapi")
+            .create_project("我的项目", cat.id, repo_path, "fastapi", "")
             .unwrap();
         let fetched = db.get_project(created.id).unwrap();
 
@@ -1632,11 +2094,11 @@ mod tests {
         let repo = TempDir::new().unwrap();
 
         let project = db
-            .create_project("旧名称", cat1.id, repo.path().to_str().unwrap(), "vue3")
+            .create_project("旧名称", cat1.id, repo.path().to_str().unwrap(), "vue3", "")
             .unwrap();
 
-        // 更新项目
-        db.update_project(project.id, "新名称", cat2.id, "fastapi")
+        // 更新项目（包含路径）
+        db.update_project(project.id, "新名称", cat2.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
 
         // 验证更新结果
@@ -1652,7 +2114,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = Database::init(dir.path()).unwrap();
 
-        let err = db.update_project(999, "名称", 1, "fastapi").unwrap_err();
+        let err = db.update_project(999, "名称", 1, dir.path().to_str().unwrap(), "fastapi", "").unwrap_err();
         assert!(err.contains("不存在"));
     }
 
@@ -1666,7 +2128,7 @@ mod tests {
         let repo = TempDir::new().unwrap();
 
         let project = db
-            .create_project("待删除", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .create_project("待删除", cat.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
         db.delete_project(project.id).unwrap();
 
@@ -1695,7 +2157,7 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
         let project = db
-            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
 
         // 手动插入客户和关联数据
@@ -1764,7 +2226,7 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
         let project = db
-            .create_project("项目A", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .create_project("项目A", cat.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
 
         // 创建客户并关联到项目
@@ -1816,10 +2278,10 @@ mod tests {
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
         let p1 = db
-            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
         let p2 = db
-            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3", "")
             .unwrap();
 
         // 创建客户并关联到两个项目
@@ -1847,10 +2309,10 @@ mod tests {
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
         let p1 = db
-            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
         let p2 = db
-            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3", "")
             .unwrap();
 
         // 客户1 关联到项目A
@@ -1884,7 +2346,7 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
         let project = db
-            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
 
         // 未创建任何客户，查询应返回空列表
@@ -1963,7 +2425,7 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
         let project = db
-            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi", "")
             .unwrap();
 
         // 创建客户并关联到项目
@@ -2151,7 +2613,7 @@ mod tests {
             let cat = db.create_category(&cat_name, None).unwrap();
 
             // 2. 创建项目
-            let project = db.create_project(&name, cat.id, repo_path, &tech_stack).unwrap();
+            let project = db.create_project(&name, cat.id, repo_path, &tech_stack, "").unwrap();
 
             // 3. 验证创建后的字段值与输入一致
             prop_assert_eq!(&project.name, &name);
@@ -2171,15 +2633,15 @@ mod tests {
             let updated_cat_unique = format!("upd_{}", &updated_cat_name);
             let cat2 = db.create_category(&updated_cat_unique, None).unwrap();
 
-            // 6. 更新项目的名称、分类和技术栈类型
-            db.update_project(project.id, &updated_name, cat2.id, &updated_tech).unwrap();
+            // 6. 更新项目的名称、分类、路径和技术栈类型
+            db.update_project(project.id, &updated_name, cat2.id, repo_path, &updated_tech, "").unwrap();
 
             // 7. 再次读取，验证更新后的值
             let updated_project = db.get_project(project.id).unwrap();
             prop_assert_eq!(&updated_project.name, &updated_name);
             prop_assert_eq!(updated_project.category_id, cat2.id);
             prop_assert_eq!(&updated_project.tech_stack_type, &updated_tech);
-            // repo_path 不应被更新（update_project 不修改 repo_path）
+            // repo_path 使用原路径更新，应保持一致
             prop_assert_eq!(&updated_project.repo_path, repo_path);
         }
 
@@ -2208,7 +2670,7 @@ mod tests {
             let non_existent_path = format!("/tmp/prism_test_nonexistent_{}", fake_segment);
             // 确保路径确实不存在
             if !std::path::Path::new(&non_existent_path).exists() {
-                let result = db.create_project(&name, cat.id, &non_existent_path, "fastapi");
+                let result = db.create_project(&name, cat.id, &non_existent_path, "fastapi", "");
                 prop_assert!(result.is_err(), "不存在的路径应导致创建失败");
                 let err_msg = result.unwrap_err();
                 prop_assert!(
@@ -2227,7 +2689,7 @@ mod tests {
             // --- 测试存在的路径 ---
             let valid_dir = TempDir::new().unwrap();
             let valid_path = valid_dir.path().to_str().unwrap();
-            let result = db.create_project(&name, cat.id, valid_path, "fastapi");
+            let result = db.create_project(&name, cat.id, valid_path, "fastapi", "");
             prop_assert!(result.is_ok(), "存在的路径应允许创建项目成功");
 
             // 验证项目确实被持久化
@@ -2258,7 +2720,7 @@ mod tests {
 
             // 1. 创建分类和项目
             let cat = db.create_category(&cat_name, None).unwrap();
-            let project = db.create_project(&project_name, cat.id, repo_path, &tech_stack).unwrap();
+            let project = db.create_project(&project_name, cat.id, repo_path, &tech_stack, "").unwrap();
 
             // 2. 手动插入客户记录（create_client 方法尚未实现）
             db.conn()
@@ -2366,7 +2828,7 @@ mod tests {
 
             // 1. 创建分类和项目（客户需要关联到项目才能通过 list_clients_by_project 查询）
             let cat = db.create_category(&cat_name, None).unwrap();
-            let project = db.create_project(&project_name, cat.id, repo_path, "fastapi").unwrap();
+            let project = db.create_project(&project_name, cat.id, repo_path, "fastapi", "").unwrap();
 
             // 2. 创建客户并关联到项目
             let client = db.create_client(&client_name, &[project.id]).unwrap();
@@ -2423,7 +2885,7 @@ mod tests {
                 let repo_path = repo_dir.path().to_str().unwrap().to_string();
                 // 使用索引后缀确保项目名称唯一
                 let unique_name = format!("{}_{}", pname, i);
-                let project = db.create_project(&unique_name, cat.id, &repo_path, "fastapi").unwrap();
+                let project = db.create_project(&unique_name, cat.id, &repo_path, "fastapi", "").unwrap();
                 project_ids.push(project.id);
                 _repo_dirs.push(repo_dir);
             }
@@ -2469,10 +2931,10 @@ mod tests {
 
             // 2. 创建两个项目（使用前缀确保名称唯一）
             let project_a = db.create_project(
-                &format!("pa_{}", project_a_name), cat.id, repo_path_a, "fastapi"
+                &format!("pa_{}", project_a_name), cat.id, repo_path_a, "fastapi", ""
             ).unwrap();
             let project_b = db.create_project(
-                &format!("pb_{}", project_b_name), cat.id, repo_path_b, "vue3"
+                &format!("pb_{}", project_b_name), cat.id, repo_path_b, "vue3", ""
             ).unwrap();
 
             // 3. 创建客户 A 仅关联到项目 A
@@ -2550,7 +3012,7 @@ mod tests {
 
             // 1. 创建分类、项目和客户（构建记录的前置依赖）
             let cat = db.create_category(&cat_name, None).unwrap();
-            let project = db.create_project(&project_name, cat.id, repo_path, "fastapi").unwrap();
+            let project = db.create_project(&project_name, cat.id, repo_path, "fastapi", "").unwrap();
             let client = db.create_client(&client_name, &[project.id]).unwrap();
 
             // 2. 将模块名称列表序列化为 JSON 字符串
@@ -2559,7 +3021,7 @@ mod tests {
 
             // 3. 创建构建记录
             let record = db.create_build_record(
-                project.id, client.id, &modules_json, &output_path
+                project.id, client.id, &modules_json, &output_path, "v1.0.0", None
             ).unwrap();
 
             // 4. 验证返回的构建记录字段与输入一致
@@ -2611,10 +3073,10 @@ mod tests {
             // 1. 创建分类和两个项目
             let cat = db.create_category(&cat_name, None).unwrap();
             let project_a = db.create_project(
-                &format!("pa_{}", project_a_name), cat.id, repo_path_a, "fastapi"
+                &format!("pa_{}", project_a_name), cat.id, repo_path_a, "fastapi", ""
             ).unwrap();
             let project_b = db.create_project(
-                &format!("pb_{}", project_b_name), cat.id, repo_path_b, "vue3"
+                &format!("pb_{}", project_b_name), cat.id, repo_path_b, "vue3", ""
             ).unwrap();
 
             // 2. 创建客户并关联到两个项目
@@ -2626,7 +3088,7 @@ mod tests {
                 let modules_json = format!("[\"mod_a_{}\"]", i);
                 let output_path = format!("/tmp/build_a_{}.zip", i);
                 let record = db.create_build_record(
-                    project_a.id, client.id, &modules_json, &output_path
+                    project_a.id, client.id, &modules_json, &output_path, "v1.0.0", None
                 ).unwrap();
                 records_a_ids.push(record.id);
             }
@@ -2637,7 +3099,7 @@ mod tests {
                 let modules_json = format!("[\"mod_b_{}\"]", i);
                 let output_path = format!("/tmp/build_b_{}.zip", i);
                 let record = db.create_build_record(
-                    project_b.id, client.id, &modules_json, &output_path
+                    project_b.id, client.id, &modules_json, &output_path, "v1.0.0", None
                 ).unwrap();
                 records_b_ids.push(record.id);
             }
@@ -2801,7 +3263,7 @@ mod tests {
                     let tech = if i < tech_len { &tech_stacks[i] } else { "fastapi" };
                     let cat_id = created_categories[i].id;
                     let project = db.create_project(
-                        &unique_name, cat_id, &repo_path, tech
+                        &unique_name, cat_id, &repo_path, tech, ""
                     ).unwrap();
                     created_projects.push(project);
                     _repo_dirs.push(repo_dir);
