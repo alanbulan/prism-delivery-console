@@ -28,6 +28,7 @@ walkdir = "2"
 scopeguard = "1"
 rusqlite = { version = "0.34", features = ["bundled"] }
 thiserror = "2"
+log = "0.4"
 tauri-plugin-process = "2"
 
 [dev-dependencies]

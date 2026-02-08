@@ -7,6 +7,7 @@
 // 新增技术栈只需添加新的 struct + impl，无需修改现有代码（OCP 原则）。
 
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::dtos::BuildResult;
 use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
@@ -99,6 +100,61 @@ impl BuildStrategy for Vue3BuildStrategy {
 // 通用构建流程（DRY 原则：提取公共逻辑）
 // ============================================================================
 
+/// 生成时间戳后缀（格式：yyyyMMdd_HHmmss）
+fn timestamp_suffix() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // 简易 UTC 时间格式化，避免引入 chrono 依赖（KISS 原则）
+    let secs_per_day = 86400u64;
+    let secs_per_hour = 3600u64;
+    let secs_per_min = 60u64;
+
+    let days = now / secs_per_day;
+    let time_of_day = now % secs_per_day;
+    let hour = time_of_day / secs_per_hour;
+    let minute = (time_of_day % secs_per_hour) / secs_per_min;
+    let second = time_of_day % secs_per_min;
+
+    // 从 Unix 纪元天数计算年月日
+    let (year, month, day) = days_to_ymd(days);
+    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", year, month, day, hour, minute, second)
+}
+
+/// 将 Unix 纪元天数转换为 (年, 月, 日)
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // 简化的公历算法（足够满足时间戳需求）
+    let mut y = 1970u64;
+    let mut remaining = days;
+    loop {
+        let days_in_year = if is_leap(y) { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        y += 1;
+    }
+    let months_days: [u64; 12] = if is_leap(y) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut m = 1u64;
+    for &md in &months_days {
+        if remaining < md {
+            break;
+        }
+        remaining -= md;
+        m += 1;
+    }
+    (y, m, remaining + 1)
+}
+
+fn is_leap(y: u64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
 /// 通用构建流程，供各策略复用
 fn build_common(
     strategy: &dyn BuildStrategy,
@@ -109,7 +165,18 @@ fn build_common(
     // 1. 验证构建参数
     validate_build_params(client_name, selected_modules)?;
 
-    let dist_name = format!("dist_{}", client_name.trim());
+    // 风险点1：路径含空格/特殊字符时记录警告（Rust Path API 本身可正确处理）
+    let path_str = project_path.to_string_lossy();
+    if path_str.contains(' ') || path_str.chars().any(|c| c > '\x7F') {
+        log::warn!(
+            "项目路径包含空格或非 ASCII 字符，可能影响部分外部工具兼容性: {}",
+            path_str
+        );
+    }
+
+    // 风险点4+5：使用时间戳后缀避免临时目录和 ZIP 文件名冲突
+    let ts = timestamp_suffix();
+    let dist_name = format!("dist_{}_{}", client_name.trim(), ts);
     let temp_dir = project_path.join(&dist_name);
     let zip_path = project_path.join(format!("{}.zip", dist_name));
 
@@ -152,20 +219,44 @@ fn build_common(
     std::fs::create_dir_all(&modules_dest)
         .map_err(|e| AppError::BuildError(format!("无法创建 {} 目录: {}", modules_dir_name, e)))?;
 
+    let mut skipped_modules: Vec<String> = Vec::new();
     for module_name in selected_modules {
         let module_src = project_path.join(modules_dir_name).join(module_name);
         let module_dst = modules_dest.join(module_name);
 
         if module_src.is_dir() {
             copy_dir_recursive(&module_src, &module_dst)?;
+        } else {
+            // 风险点6：模块目录不存在时记录警告而非静默跳过
+            log::warn!(
+                "选中的模块目录不存在，已跳过: {}",
+                module_src.display()
+            );
+            skipped_modules.push(module_name.clone());
         }
+    }
+
+    // 如果所有选中模块都不存在，视为构建失败
+    if skipped_modules.len() == selected_modules.len() {
+        return Err(AppError::BuildError(
+            "所有选中的模块目录均不存在，无法构建".to_string(),
+        ));
+    }
+
+    // 风险点3：大量文件时记录警告日志
+    let file_count = walkdir::WalkDir::new(&temp_dir).into_iter().count();
+    if file_count > 5000 {
+        log::warn!(
+            "构建包文件数量较多 ({} 个)，打包可能需要较长时间",
+            file_count
+        );
     }
 
     // 6. 打包为 ZIP 文件
     create_zip_from_dir(&temp_dir, &zip_path)?;
 
-    // 7. 返回构建结果
-    let module_count = selected_modules.len();
+    // 7. 返回构建结果（实际打包的模块数 = 选中数 - 跳过数）
+    let module_count = selected_modules.len() - skipped_modules.len();
 
     Ok(BuildResult {
         zip_path: zip_path.to_string_lossy().to_string(),
@@ -335,5 +426,67 @@ mod tests {
         let result = builder.build(dir.path(), &modules, "客户A");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("至少需要选择一个模块"));
+    }
+
+    #[test]
+    fn test_build_with_all_nonexistent_modules_fails() {
+        let dir = TempDir::new().unwrap();
+        create_fastapi_project(&dir);
+
+        let builder = FastApiBuildStrategy;
+        let modules = vec!["nonexistent_a".to_string(), "nonexistent_b".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户A");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("所有选中的模块目录均不存在"));
+    }
+
+    #[test]
+    fn test_build_with_partial_nonexistent_modules_succeeds() {
+        let dir = TempDir::new().unwrap();
+        create_fastapi_project(&dir);
+
+        let builder = FastApiBuildStrategy;
+        // "auth" 存在，"nonexistent" 不存在
+        let modules = vec!["auth".to_string(), "nonexistent".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户A").unwrap();
+        // 实际打包的模块数应为 1（跳过了不存在的模块）
+        assert_eq!(result.module_count, 1);
+        assert_eq!(result.client_name, "客户A");
+
+        let zip_path = Path::new(&result.zip_path);
+        assert!(zip_path.exists());
+        let _ = fs::remove_file(zip_path);
+    }
+
+    #[test]
+    fn test_timestamp_suffix_format() {
+        let ts = timestamp_suffix();
+        // 格式应为 yyyyMMdd_HHmmss（15 个字符）
+        assert_eq!(ts.len(), 15);
+        assert_eq!(&ts[8..9], "_");
+        // 所有非下划线字符应为数字
+        assert!(ts.chars().filter(|&c| c != '_').all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_zip_filename_contains_timestamp() {
+        let dir = TempDir::new().unwrap();
+        create_fastapi_project(&dir);
+
+        let builder = FastApiBuildStrategy;
+        let modules = vec!["auth".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户A").unwrap();
+
+        // ZIP 路径应包含时间戳（dist_客户A_yyyyMMdd_HHmmss.zip）
+        assert!(result.zip_path.contains("dist_客户A_"));
+        // 文件名中应有 15 位时间戳
+        let filename = Path::new(&result.zip_path)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert!(filename.starts_with("dist_客户A_"));
+
+        let _ = fs::remove_file(&result.zip_path);
     }
 }

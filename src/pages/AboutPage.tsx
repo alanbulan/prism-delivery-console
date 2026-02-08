@@ -95,8 +95,15 @@ export function AboutPage() {
       // 短暂延迟后重启，让用户看到提示
       setTimeout(() => relaunch(), 1500);
     } catch (err) {
-      setUpdateStatus("error");
-      toast.error(`检查更新失败: ${String(err)}`);
+      const msg = String(err);
+      // 尚未发布任何 Release 时，updater 会返回此错误，属于正常情况
+      if (msg.includes("Could not fetch") || msg.includes("valid release")) {
+        setUpdateStatus("upToDate");
+        toast.info("当前已是最新版本（暂无已发布的更新）");
+      } else {
+        setUpdateStatus("error");
+        toast.error(`检查更新失败: ${msg}`);
+      }
       setTimeout(() => setUpdateStatus("idle"), 3000);
     }
   }, []);
