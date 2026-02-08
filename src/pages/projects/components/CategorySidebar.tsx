@@ -60,14 +60,25 @@ export function CategorySidebar({
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
             >
-              {/* 分类名称按钮 */}
+              {/* 分类名称 + 描述 */}
               <button
                 type="button"
                 onClick={() => onSelect(cat.id)}
-                className="flex-1 truncate px-3 py-2 text-left text-sm"
+                className="flex flex-1 flex-col truncate px-3 py-2 text-left"
                 title={cat.description ?? cat.name}
               >
-                {cat.name}
+                <span className="truncate text-sm">{cat.name}</span>
+                {cat.description && (
+                  <span
+                    className={`truncate text-xs ${
+                      isActive
+                        ? "text-primary-foreground/70"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {cat.description}
+                  </span>
+                )}
               </button>
               {/* 编辑/删除操作（悬停显示） */}
               <div className="flex shrink-0 gap-0.5 pr-1 opacity-0 transition-opacity group-hover:opacity-100">

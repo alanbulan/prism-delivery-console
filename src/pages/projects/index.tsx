@@ -48,16 +48,8 @@ export function ProjectPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* 页面标题栏 */}
-      <header className="glass-subtle flex items-center justify-between px-5 py-3">
+      <header className="glass-subtle flex items-center px-5 py-3">
         <h2 className="text-base font-semibold text-foreground">项目管理</h2>
-        <button
-          type="button"
-          onClick={handleAddCategory}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>新建分类</span>
-        </button>
       </header>
 
       {/* 主内容区：左侧分类 + 右侧项目 */}

@@ -9,8 +9,12 @@ import type { ModuleInfo, BuildResult, Category, Project, Client, BuildRecord, P
 interface NavigationSlice {
   /** 当前活动页面标识 */
   currentPage: PageId;
+  /** 侧边栏是否收起 */
+  sidebarCollapsed: boolean;
   /** 设置当前活动页面 */
   setCurrentPage: (page: PageId) => void;
+  /** 切换侧边栏收展状态 */
+  toggleSidebar: () => void;
 }
 
 /** V2 项目管理状态 Slice */
@@ -40,22 +44,7 @@ interface ProjectManagementSlice {
   resetProjectManagement: () => void;
 }
 
-/** V1 快速构建状态 Slice（保留，用于 QuickBuildPage） */
-interface QuickBuildSlice {
-  /** 当前项目根目录路径 */
-  projectPath: string | null;
-  /** 核心架构文件列表（白名单中实际存在的文件） */
-  coreFiles: string[];
-  /** 客户名称，用于命名交付包 */
-  clientName: string;
-
-  /** 设置项目路径和核心文件，同时重置之前的模块选择状态 */
-  setProject: (path: string, coreFiles: string[]) => void;
-  /** 设置客户名称 */
-  setClientName: (name: string) => void;
-}
-
-/** 模块选择状态 Slice（V1/V2 共享） */
+/** 模块选择状态 Slice */
 interface ModuleSlice {
   /** 扫描到的所有业务模块 */
   modules: ModuleInfo[];
@@ -81,8 +70,8 @@ interface ModuleSlice {
 }
 
 /** 应用全局状态接口 - 由所有 Slice 组合而成 */
-type AppStore = NavigationSlice & ProjectManagementSlice & QuickBuildSlice & ModuleSlice & {
-  /** 重置模块和构建相关状态（不清除项目路径、核心文件和当前页面） */
+type AppStore = NavigationSlice & ProjectManagementSlice & ModuleSlice & {
+  /** 重置项目管理和构建相关状态（保留当前页面） */
   reset: () => void;
 };
 
@@ -96,8 +85,10 @@ type AppStore = NavigationSlice & ProjectManagementSlice & QuickBuildSlice & Mod
  */
 export const useAppStore = create<AppStore>((set, get) => ({
   // ========== Navigation Slice ==========
-  currentPage: 'projects',
+  currentPage: 'build',
+  sidebarCollapsed: false,
   setCurrentPage: (page) => set({ currentPage: page }),
+  toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
   // ========== Project Management Slice (V2) ==========
   categories: [],
@@ -119,19 +110,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     buildRecords: [],
   }),
 
-  // ========== Quick Build Slice (V1) ==========
-  projectPath: null,
-  coreFiles: [],
-  clientName: "",
-
-  setProject: (path, coreFiles) => {
-    // 重置模块和构建状态，再设置新项目信息
-    get().reset();
-    set({ projectPath: path, coreFiles });
-  },
-  setClientName: (name) => set({ clientName: name }),
-
-  // ========== Module Slice (共享) ==========
+  // ========== Module Slice ==========
   modules: [],
   selectedModules: new Set<string>(),
   isBuilding: false,
@@ -169,7 +148,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setBuildingState: (building) => set({ isBuilding: building }),
   setBuildResult: (result) => set({ buildResult: result }),
 
-  /** 重置模块和构建相关状态，保留项目路径、核心文件和当前页面 */
+  /** 重置项目管理和构建相关状态，保留当前页面 */
   reset: () => set({
     categories: [],
     projects: [],
@@ -178,7 +157,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     buildRecords: [],
     modules: [],
     selectedModules: new Set<string>(),
-    clientName: "",
     isBuilding: false,
     buildResult: null,
   }),

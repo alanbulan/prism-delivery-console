@@ -22,18 +22,15 @@ function resetStore() {
     selectedProjectId: null,
     clients: [],
     buildRecords: [],
-    projectPath: null,
-    coreFiles: [],
     modules: [],
     selectedModules: new Set<string>(),
-    clientName: "",
     isBuilding: false,
     buildResult: null,
   });
 }
 
 /** 所有有效页面 ID */
-const ALL_PAGES: PageId[] = ["projects", "build", "settings", "about"];
+const ALL_PAGES: PageId[] = ["projects", "build", "analysis", "settings", "about"];
 
 /** 测试用分类数据 */
 const mockCategories: Category[] = [
@@ -43,8 +40,8 @@ const mockCategories: Category[] = [
 
 /** 测试用项目数据 */
 const mockProjects: Project[] = [
-  { id: 1, name: "Vue3 管理后台", category_id: 1, repo_path: "/projects/admin", tech_stack_type: "vue3", created_at: "2024-01-01", updated_at: "2024-01-01" },
-  { id: 2, name: "FastAPI 服务", category_id: 2, repo_path: "/projects/api", tech_stack_type: "fastapi", created_at: "2024-01-02", updated_at: "2024-01-02" },
+  { id: 1, name: "Vue3 管理后台", category_id: 1, repo_path: "/projects/admin", tech_stack_type: "vue3", modules_dir: "src/views", created_at: "2024-01-01", updated_at: "2024-01-01" },
+  { id: 2, name: "FastAPI 服务", category_id: 2, repo_path: "/projects/api", tech_stack_type: "fastapi", modules_dir: "modules", created_at: "2024-01-02", updated_at: "2024-01-02" },
 ];
 
 /** 测试用客户数据 */
@@ -62,7 +59,7 @@ const mockModules: ModuleInfo[] = [
 
 /** 测试用构建记录数据 */
 const mockBuildRecords: BuildRecord[] = [
-  { id: 1, project_id: 2, client_id: 1, selected_modules: '["auth","billing"]', output_path: "/output/客户甲_api.zip", created_at: "2024-03-01" },
+  { id: 1, project_id: 2, client_id: 1, selected_modules: '["auth","billing"]', output_path: "/output/客户甲_api.zip", version: "v1.0.0", changelog: null, created_at: "2024-03-01" },
 ];
 
 // ========== 集成测试 ==========
@@ -117,26 +114,24 @@ describe("页面导航流程集成测试", () => {
     expect(state.selectedProjectId).toBe(1);
   });
 
-  it("页面切换不应影响模块选择和构建状态", () => {
-    // 先设置模块和构建状态
+  it("页面切换不应影响模块选择状态", () => {
+    // 先设置模块状态
     const store = useAppStore.getState();
     store.setModules(mockModules);
     store.toggleModule("auth");
     store.toggleModule("billing");
-    store.setClientName("客户甲");
 
     // 在多个页面之间切换
     useAppStore.getState().setCurrentPage("settings");
     useAppStore.getState().setCurrentPage("about");
     useAppStore.getState().setCurrentPage("build");
 
-    // 验证模块和构建状态未被影响
+    // 验证模块状态未被影响
     const state = useAppStore.getState();
     expect(state.modules).toEqual(mockModules);
     expect(state.selectedModules.has("auth")).toBe(true);
     expect(state.selectedModules.has("billing")).toBe(true);
     expect(state.selectedModules.has("reports")).toBe(false);
-    expect(state.clientName).toBe("客户甲");
   });
 
   it("连续快速切换页面后状态应保持一致", () => {
@@ -194,8 +189,7 @@ describe("项目创建到构建完整流程集成测试", () => {
     expect(useAppStore.getState().selectedModules.has("auth")).toBe(true);
     expect(useAppStore.getState().selectedModules.has("billing")).toBe(true);
 
-    // 步骤 7：设置客户名称并开始构建
-    useAppStore.getState().setClientName("客户甲");
+    // 步骤 7：开始构建
     useAppStore.getState().setBuildingState(true);
     expect(useAppStore.getState().isBuilding).toBe(true);
 

@@ -22,9 +22,81 @@ import {
   RefreshCw,
   Download,
   CheckCircle2,
+  ScrollText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ChangelogModal } from "@/components/ChangelogModal";
+
+// ============================================================================
+// 技术栈图标组件（内联 SVG，避免外部依赖）
+// ============================================================================
+
+/** Tauri 图标 */
+const TauriIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+    <circle cx="8" cy="8" r="3" fill="#FFC131" />
+    <circle cx="16" cy="16" r="3" fill="#24C8DB" />
+    <path d="M10.5 9.5C12 12 12 12 13.5 14.5" stroke="#333" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+/** React 图标 */
+const ReactIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+    <circle cx="12" cy="12" r="2" fill="#61DAFB" />
+    <ellipse cx="12" cy="12" rx="10" ry="4" stroke="#61DAFB" strokeWidth="1" transform="rotate(0 12 12)" />
+    <ellipse cx="12" cy="12" rx="10" ry="4" stroke="#61DAFB" strokeWidth="1" transform="rotate(60 12 12)" />
+    <ellipse cx="12" cy="12" rx="10" ry="4" stroke="#61DAFB" strokeWidth="1" transform="rotate(120 12 12)" />
+  </svg>
+);
+
+/** TypeScript 图标 */
+const TypeScriptIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4">
+    <rect x="2" y="2" width="20" height="20" rx="3" fill="#3178C6" />
+    <text x="12" y="17" textAnchor="middle" fill="white" fontSize="12" fontWeight="bold" fontFamily="sans-serif">TS</text>
+  </svg>
+);
+
+/** Rust 图标（齿轮简化版） */
+const RustIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+    <circle cx="12" cy="12" r="8" stroke="#CE422B" strokeWidth="2" />
+    <circle cx="12" cy="12" r="3" fill="#CE422B" />
+    <line x1="12" y1="2" x2="12" y2="5" stroke="#CE422B" strokeWidth="2" strokeLinecap="round" />
+    <line x1="12" y1="19" x2="12" y2="22" stroke="#CE422B" strokeWidth="2" strokeLinecap="round" />
+    <line x1="2" y1="12" x2="5" y2="12" stroke="#CE422B" strokeWidth="2" strokeLinecap="round" />
+    <line x1="19" y1="12" x2="22" y2="12" stroke="#CE422B" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+/** Zustand 图标（熊掌简化版） */
+const ZustandIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+    <circle cx="12" cy="13" r="8" fill="#443D3A" />
+    <circle cx="9" cy="11" r="1.5" fill="white" />
+    <circle cx="15" cy="11" r="1.5" fill="white" />
+    <ellipse cx="12" cy="14.5" rx="2.5" ry="1.5" fill="#D4A574" />
+  </svg>
+);
+
+/** Tailwind CSS 图标 */
+const TailwindIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="#06B6D4">
+    <path d="M12 6C9.33 6 7.67 7.33 7 10c1-1.33 2.17-1.83 3.5-1.5.76.19 1.3.74 1.9 1.35C13.35 10.82 14.5 12 17 12c2.67 0 4.33-1.33 5-4-1 1.33-2.17 1.83-3.5 1.5-.76-.19-1.3-.74-1.9-1.35C15.65 7.18 14.5 6 12 6zM7 12c-2.67 0-4.33 1.33-5 4 1-1.33 2.17-1.83 3.5-1.5.76.19 1.3.74 1.9 1.35C8.35 16.82 9.5 18 12 18c2.67 0 4.33-1.33 5-4-1 1.33-2.17 1.83-3.5 1.5-.76-.19-1.3-.74-1.9-1.35C10.65 13.18 9.5 12 7 12z" />
+  </svg>
+);
+
+/** 技术栈图标映射 */
+const TECH_ICON_MAP: Record<string, React.FC> = {
+  Tauri: TauriIcon,
+  React: ReactIcon,
+  TypeScript: TypeScriptIcon,
+  Rust: RustIcon,
+  Zustand: ZustandIcon,
+  "Tailwind CSS": TailwindIcon,
+};
 
 /** 技术栈条目 */
 const TECH_STACK = [
@@ -46,6 +118,8 @@ export function AboutPage() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   /** 下载进度百分比 */
   const [downloadProgress, setDownloadProgress] = useState(0);
+  /** 更新记录弹窗是否可见 */
+  const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion("unknown"));
@@ -220,13 +294,23 @@ export function AboutPage() {
               </p>
             </div>
 
-            {/* 版本标签 + 检查更新按钮 */}
+            {/* 版本标签 + 更新记录按钮 + 检查更新按钮 */}
             <div className="flex items-center gap-3">
               {version && (
                 <span className="rounded-full bg-accent px-4 py-1 text-xs font-medium text-accent-foreground">
                   v{version}
                 </span>
               )}
+              {/* 更新记录触发按钮 */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowChangelog(true)}
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <ScrollText className="h-3.5 w-3.5" />
+                更新记录
+              </Button>
               {renderUpdateButton()}
             </div>
           </section>
@@ -238,26 +322,39 @@ export function AboutPage() {
               <h3 className="text-sm font-semibold text-foreground">技术栈</h3>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {TECH_STACK.map((tech) => (
-                <div
-                  key={tech.name}
-                  className="glass-subtle flex flex-col gap-0.5 px-3 py-2.5"
-                >
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-sm font-medium text-foreground">
-                      {tech.name}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {tech.version}
-                    </span>
+              {TECH_STACK.map((tech) => {
+                const Icon = TECH_ICON_MAP[tech.name];
+                return (
+                  <div
+                    key={tech.name}
+                    className="glass-subtle flex items-start gap-2.5 px-3 py-2.5"
+                  >
+                    {/* 技术栈图标 */}
+                    {Icon && (
+                      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-background/60 ring-1 ring-border/40">
+                        <Icon />
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-sm font-medium text-foreground">
+                          {tech.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {tech.version}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground/70">
+                        {tech.desc}
+                      </span>
+                    </div>
                   </div>
-                  <span className="text-xs text-muted-foreground/70">
-                    {tech.desc}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
+
+          {/* 更新记录卡片 → 已移至 ChangelogModal 弹窗组件 */}
 
           {/* 项目信息卡片 */}
           <div className="grid grid-cols-2 gap-4">
@@ -293,6 +390,11 @@ export function AboutPage() {
 
         </div>
       </main>
+
+      {/* 更新记录弹窗 */}
+      {showChangelog && (
+        <ChangelogModal onClose={() => setShowChangelog(false)} />
+      )}
     </div>
   );
 }

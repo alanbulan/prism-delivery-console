@@ -16,11 +16,8 @@ function resetStore() {
     selectedProjectId: null,
     clients: [],
     buildRecords: [],
-    projectPath: null,
-    coreFiles: [],
     modules: [],
     selectedModules: new Set<string>(),
-    clientName: "",
     isBuilding: false,
     buildResult: null,
   });
@@ -41,61 +38,19 @@ describe("AppStore", () => {
   describe("初始状态", () => {
     it("应具有正确的默认值", () => {
       const state = useAppStore.getState();
-      // V2 导航状态
+      // 导航状态
       expect(state.currentPage).toBe('projects');
-      // V2 项目管理状态
+      // 项目管理状态
       expect(state.categories).toEqual([]);
       expect(state.projects).toEqual([]);
       expect(state.selectedProjectId).toBeNull();
       expect(state.clients).toEqual([]);
       expect(state.buildRecords).toEqual([]);
-      // V1 项目状态
-      expect(state.projectPath).toBeNull();
-      expect(state.coreFiles).toEqual([]);
+      // 模块状态
       expect(state.modules).toEqual([]);
       expect(state.selectedModules).toEqual(new Set());
-      expect(state.clientName).toBe("");
       expect(state.isBuilding).toBe(false);
       expect(state.buildResult).toBeNull();
-    });
-  });
-
-  describe("setProject", () => {
-    it("应设置项目路径和核心文件", () => {
-      const { setProject } = useAppStore.getState();
-      setProject("/path/to/project", ["main.py", "config/"]);
-
-      const state = useAppStore.getState();
-      expect(state.projectPath).toBe("/path/to/project");
-      expect(state.coreFiles).toEqual(["main.py", "config/"]);
-    });
-
-    it("应在设置新项目时重置模块和构建状态（需求 7.2）", () => {
-      const store = useAppStore.getState();
-      // 先设置一些状态
-      store.setProject("/old/path", ["main.py"]);
-      store.setModules(mockModules);
-      store.toggleModule("auth");
-      store.setClientName("客户A");
-      store.setBuildResult({
-        zip_path: "/output/dist.zip",
-        client_name: "客户A",
-        module_count: 1,
-      });
-
-      // 重新设置项目
-      useAppStore.getState().setProject("/new/path", ["main.py", "utils/"]);
-
-      const state = useAppStore.getState();
-      // 项目信息应更新
-      expect(state.projectPath).toBe("/new/path");
-      expect(state.coreFiles).toEqual(["main.py", "utils/"]);
-      // 模块和构建状态应被重置
-      expect(state.modules).toEqual([]);
-      expect(state.selectedModules.size).toBe(0);
-      expect(state.clientName).toBe("");
-      expect(state.buildResult).toBeNull();
-      expect(state.isBuilding).toBe(false);
     });
   });
 
@@ -198,13 +153,6 @@ describe("AppStore", () => {
     });
   });
 
-  describe("setClientName", () => {
-    it("应设置客户名称", () => {
-      useAppStore.getState().setClientName("客户B");
-      expect(useAppStore.getState().clientName).toBe("客户B");
-    });
-  });
-
   describe("setBuildingState", () => {
     it("应设置构建中状态", () => {
       useAppStore.getState().setBuildingState(true);
@@ -238,44 +186,38 @@ describe("AppStore", () => {
   });
 
   describe("reset", () => {
-    it("应重置模块和构建状态，但保留项目路径、核心文件和当前页面", () => {
+    it("应重置项目管理和构建状态，但保留当前页面", () => {
       const store = useAppStore.getState();
-      store.setProject("/project", ["main.py", "core/"]);
       store.setModules(mockModules);
       store.toggleModule("auth");
-      store.setClientName("客户C");
       store.setBuildingState(true);
       store.setBuildResult({
         zip_path: "/output/dist.zip",
         client_name: "客户C",
         module_count: 1,
       });
-      // 设置 V2 状态
+      // 设置项目管理状态
       store.setCurrentPage('build');
       store.setCategories([{ id: 1, name: "前端", description: null, created_at: "2024-01-01" }]);
-      store.setProjects([{ id: 1, name: "项目A", category_id: 1, repo_path: "/a", tech_stack_type: "vue3", created_at: "2024-01-01", updated_at: "2024-01-01" }]);
+      store.setProjects([{ id: 1, name: "项目A", category_id: 1, repo_path: "/a", tech_stack_type: "vue3", modules_dir: "src/views", created_at: "2024-01-01", updated_at: "2024-01-01" }]);
       store.setSelectedProjectId(1);
       store.setClients([{ id: 1, name: "客户X", created_at: "2024-01-01" }]);
-      store.setBuildRecords([{ id: 1, project_id: 1, client_id: 1, selected_modules: "[]", output_path: "/out", created_at: "2024-01-01" }]);
+      store.setBuildRecords([{ id: 1, project_id: 1, client_id: 1, selected_modules: "[]", output_path: "/out", version: "v1.0.0", changelog: null, created_at: "2024-01-01" }]);
 
       useAppStore.getState().reset();
 
       const state = useAppStore.getState();
-      // 项目路径和核心文件应保留
-      expect(state.projectPath).toBe("/project");
-      expect(state.coreFiles).toEqual(["main.py", "core/"]);
       // 当前页面应保留
       expect(state.currentPage).toBe('build');
-      // V2 项目管理状态应被重置
+      // 项目管理状态应被重置
       expect(state.categories).toEqual([]);
       expect(state.projects).toEqual([]);
       expect(state.selectedProjectId).toBeNull();
       expect(state.clients).toEqual([]);
       expect(state.buildRecords).toEqual([]);
-      // V1 模块和构建状态应被重置
+      // 模块和构建状态应被重置
       expect(state.modules).toEqual([]);
       expect(state.selectedModules.size).toBe(0);
-      expect(state.clientName).toBe("");
       expect(state.isBuilding).toBe(false);
       expect(state.buildResult).toBeNull();
     });
@@ -323,7 +265,7 @@ describe("AppStore", () => {
   describe("setProjects", () => {
     it("应设置项目列表", () => {
       const projects = [
-        { id: 1, name: "项目A", category_id: 1, repo_path: "/a", tech_stack_type: "fastapi", created_at: "2024-01-01", updated_at: "2024-01-01" },
+        { id: 1, name: "项目A", category_id: 1, repo_path: "/a", tech_stack_type: "fastapi", modules_dir: "modules", created_at: "2024-01-01", updated_at: "2024-01-01" },
       ];
       useAppStore.getState().setProjects(projects);
       expect(useAppStore.getState().projects).toEqual(projects);
@@ -357,7 +299,7 @@ describe("AppStore", () => {
   describe("setBuildRecords", () => {
     it("应设置构建历史记录列表", () => {
       const records = [
-        { id: 1, project_id: 1, client_id: 1, selected_modules: '["auth"]', output_path: "/out/a.zip", created_at: "2024-01-01" },
+        { id: 1, project_id: 1, client_id: 1, selected_modules: '["auth"]', output_path: "/out/a.zip", version: "v1.0.0", changelog: null, created_at: "2024-01-01" },
       ];
       useAppStore.getState().setBuildRecords(records);
       expect(useAppStore.getState().buildRecords).toEqual(records);

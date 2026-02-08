@@ -4,6 +4,7 @@
  * 职责：
  * - 提供项目名称、分类、仓库路径、技术栈的表单输入
  * - 新建或编辑项目，调用 Rust 后端 db_create_project / db_update_project
+ * - 保存前调用 scan_project_modules 校验项目结构（严格模式：校验失败阻止保存）
  */
 
 import { useState } from "react";
@@ -30,6 +31,7 @@ export function ProjectFormModal({
   const [techStack, setTechStack] = useState(
     project?.tech_stack_type ?? "fastapi"
   );
+  const [modulesDir, setModulesDir] = useState(project?.modules_dir ?? "");
   const [saving, setSaving] = useState(false);
   const isEdit = project !== null;
 
@@ -48,6 +50,7 @@ export function ProjectFormModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
+    const trimmedPath = repoPath.trim();
     if (!trimmedName) {
       toast.error("项目名称不能为空");
       return;
@@ -56,26 +59,37 @@ export function ProjectFormModal({
       toast.error("请选择分类");
       return;
     }
-    if (!isEdit && !repoPath.trim()) {
+    if (!trimmedPath) {
       toast.error("请选择仓库路径");
       return;
     }
+
     setSaving(true);
     try {
+      // 保存前校验项目结构（传入自定义模块目录）
+      await invoke("scan_project_modules", {
+        projectPath: trimmedPath,
+        techStack: techStack,
+        modulesDir: modulesDir.trim(),
+      });
+
       if (isEdit) {
         await invoke("db_update_project", {
           id: project.id,
           name: trimmedName,
           categoryId: categoryId,
+          repoPath: trimmedPath,
           techStack: techStack,
+          modulesDir: modulesDir.trim(),
         });
         toast.success("项目已更新");
       } else {
         await invoke("db_create_project", {
           name: trimmedName,
           categoryId: categoryId,
-          repoPath: repoPath.trim(),
+          repoPath: trimmedPath,
           techStack: techStack,
+          modulesDir: modulesDir.trim(),
         });
         toast.success("项目已创建");
       }
@@ -134,31 +148,29 @@ export function ProjectFormModal({
             ))}
           </select>
         </div>
-        {/* 仓库路径（仅新建时可选择） */}
-        {!isEdit && (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-foreground">
-              仓库路径
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={repoPath}
-                readOnly
-                placeholder="点击右侧按钮选择文件夹"
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none"
-              />
-              <button
-                type="button"
-                onClick={handlePickFolder}
-                className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-accent"
-              >
-                <FolderOpen className="h-4 w-4" />
-                <span>选择</span>
-              </button>
-            </div>
+        {/* 仓库路径（新建和编辑均可选择） */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-foreground">
+            仓库路径
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={repoPath}
+              readOnly
+              placeholder="点击右侧按钮选择文件夹"
+              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none"
+            />
+            <button
+              type="button"
+              onClick={handlePickFolder}
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-accent"
+            >
+              <FolderOpen className="h-4 w-4" />
+              <span>选择</span>
+            </button>
           </div>
-        )}
+        </div>
         {/* 技术栈类型 */}
         <div>
           <label className="mb-1 block text-sm font-medium text-foreground">
@@ -175,6 +187,22 @@ export function ProjectFormModal({
               </option>
             ))}
           </select>
+        </div>
+        {/* 模块目录（相对路径，留空使用默认值） */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-foreground">
+            模块目录
+          </label>
+          <input
+            type="text"
+            value={modulesDir}
+            onChange={(e) => setModulesDir(e.target.value)}
+            placeholder={techStack === "vue3" ? "src/views" : "modules"}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            相对于仓库根目录的路径，留空使用默认值
+          </p>
         </div>
         {/* 操作按钮 */}
         <div className="flex justify-end gap-2">
