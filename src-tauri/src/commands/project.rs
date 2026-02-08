@@ -7,10 +7,10 @@ use crate::models::dtos::{ModuleInfo, ProjectInfo};
 use crate::services::scan_strategy;
 use crate::services::scanner;
 
-/// 打开项目：弹出原生文件夹选择对话框，验证项目结构
+/// 打开项目：弹出原生文件夹选择对话框，返回项目路径
 ///
-/// 调用系统原生文件夹选择对话框，用户选择文件夹后验证其是否为有效的
-/// FastAPI 项目（包含 main.py 和 modules/ 目录），并返回项目信息。
+/// 调用系统原生文件夹选择对话框，用户选择文件夹后返回路径。
+/// 不再强制验证 FastAPI 项目结构，由前端根据技术栈选择后调用对应扫描策略。
 #[tauri::command]
 pub async fn open_project(app: tauri::AppHandle) -> Result<ProjectInfo, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -29,13 +29,9 @@ pub async fn open_project(app: tauri::AppHandle) -> Result<ProjectInfo, String> 
         .as_path()
         .ok_or_else(|| "项目验证失败：无法解析所选文件夹路径".to_string())?;
 
-    // 调用 services 层验证项目结构并扫描核心文件
-    let core_files = scanner::validate_project(path)
-        .map_err(|e| e.to_string())?;
-
     Ok(ProjectInfo {
         path: path.to_string_lossy().to_string(),
-        core_files,
+        core_files: vec![], // 核心文件由前端选择技术栈后通过扫描获取
     })
 }
 
@@ -55,11 +51,13 @@ pub async fn scan_modules(project_path: String) -> Result<Vec<ModuleInfo>, Strin
 /// # 参数
 /// - `project_path`: 项目根目录路径
 /// - `tech_stack`: 技术栈类型标识（如 "fastapi"、"vue3"）
+/// - `modules_dir`: 用户自定义的模块目录（相对路径），为空则使用技术栈默认值
 #[tauri::command]
 pub async fn scan_project_modules(
     project_path: String,
     tech_stack: String,
+    modules_dir: String,
 ) -> Result<Vec<ModuleInfo>, String> {
     let scanner = scan_strategy::get_scanner(&tech_stack).map_err(|e| e.to_string())?;
-    scanner.scan(std::path::Path::new(&project_path)).map_err(|e| e.to_string())
+    scanner.scan(std::path::Path::new(&project_path), &modules_dir).map_err(|e| e.to_string())
 }

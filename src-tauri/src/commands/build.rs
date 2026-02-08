@@ -5,6 +5,7 @@
 
 use crate::models::dtos::BuildResult;
 use crate::services::build_strategy::{self, BuildStrategy};
+use tauri::Emitter;
 
 /// 构建交付包（V1 兼容接口）：委托给 FastAPI 构建策略
 ///
@@ -16,33 +17,44 @@ pub async fn build_package(
     selected_modules: Vec<String>,
     client_name: String,
 ) -> Result<BuildResult, String> {
-    // 直接委托给 FastAPI 构建策略（V1 仅支持 FastAPI 项目）
+    // 直接委托给 FastAPI 构建策略（V1 仅支持 FastAPI 项目，使用默认 modules 目录）
     let builder = build_strategy::FastApiBuildStrategy;
     builder.build(
         std::path::Path::new(&project_path),
         &selected_modules,
         &client_name,
+        "",
     )
     .map_err(|e| e.to_string())
 }
 
-/// 构建项目交付包（多技术栈支持）
+/// 构建项目交付包（多技术栈支持，带实时日志推送）
 ///
-/// 根据技术栈类型调用对应的构建策略。
+/// 根据技术栈类型调用对应的构建策略，通过 Tauri Event 向前端推送构建日志。
 /// 注意：此 command 不创建构建记录，前端应在构建成功后单独调用
 /// db_create_build_record 来记录构建历史。
 #[tauri::command]
 pub async fn build_project_package(
+    app: tauri::AppHandle,
     project_path: String,
     selected_modules: Vec<String>,
     client_name: String,
     tech_stack: String,
+    modules_dir: String,
 ) -> Result<BuildResult, String> {
     let builder = build_strategy::get_builder(&tech_stack).map_err(|e| e.to_string())?;
-    builder.build(
+
+    // 构建日志回调：通过 Tauri Event 推送到前端
+    let log_fn = |msg: &str| {
+        let _ = app.emit("build-log", msg.to_string());
+    };
+
+    builder.build_with_log(
         std::path::Path::new(&project_path),
         &selected_modules,
         &client_name,
+        &modules_dir,
+        &log_fn,
     )
     .map_err(|e| e.to_string())
 }

@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::dtos::BuildResult;
 use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
+use crate::services::module_rewriter;
 use crate::services::CORE_FILES;
 use crate::utils::error::{AppError, AppResult};
 
@@ -20,18 +21,33 @@ use crate::utils::error::{AppError, AppResult};
 
 /// 技术栈构建策略 trait
 pub trait BuildStrategy {
+    /// 该策略对应的技术栈标识（如 "fastapi"、"vue3"）
+    fn tech_stack(&self) -> &str;
+
     /// 获取该技术栈的核心文件列表
     fn core_files(&self) -> &[&str];
 
-    /// 获取模块所在的子目录名
-    fn modules_dir(&self) -> &str;
+    /// 获取模块所在的默认子目录名
+    fn default_modules_dir(&self) -> &str;
 
     /// 执行构建打包
+    /// - `modules_dir`: 用户自定义的模块目录（相对路径），为空则使用默认值
     fn build(
         &self,
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
+        modules_dir: &str,
+    ) -> AppResult<BuildResult>;
+
+    /// 执行构建打包（带日志回调，用于实时推送构建进度）
+    fn build_with_log(
+        &self,
+        project_path: &Path,
+        selected_modules: &[String],
+        client_name: &str,
+        modules_dir: &str,
+        log_fn: &dyn Fn(&str),
     ) -> AppResult<BuildResult>;
 }
 
@@ -43,11 +59,15 @@ pub trait BuildStrategy {
 pub struct FastApiBuildStrategy;
 
 impl BuildStrategy for FastApiBuildStrategy {
+    fn tech_stack(&self) -> &str {
+        "fastapi"
+    }
+
     fn core_files(&self) -> &[&str] {
         CORE_FILES
     }
 
-    fn modules_dir(&self) -> &str {
+    fn default_modules_dir(&self) -> &str {
         "modules"
     }
 
@@ -56,8 +76,20 @@ impl BuildStrategy for FastApiBuildStrategy {
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
+        modules_dir: &str,
     ) -> AppResult<BuildResult> {
-        build_common(self, project_path, selected_modules, client_name)
+        build_common(self, project_path, selected_modules, client_name, modules_dir)
+    }
+
+    fn build_with_log(
+        &self,
+        project_path: &Path,
+        selected_modules: &[String],
+        client_name: &str,
+        modules_dir: &str,
+        log_fn: &dyn Fn(&str),
+    ) -> AppResult<BuildResult> {
+        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, log_fn)
     }
 }
 
@@ -78,11 +110,15 @@ const VUE3_CORE_FILES: &[&str] = &[
 pub struct Vue3BuildStrategy;
 
 impl BuildStrategy for Vue3BuildStrategy {
+    fn tech_stack(&self) -> &str {
+        "vue3"
+    }
+
     fn core_files(&self) -> &[&str] {
         VUE3_CORE_FILES
     }
 
-    fn modules_dir(&self) -> &str {
+    fn default_modules_dir(&self) -> &str {
         "src/views"
     }
 
@@ -91,8 +127,20 @@ impl BuildStrategy for Vue3BuildStrategy {
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
+        modules_dir: &str,
     ) -> AppResult<BuildResult> {
-        build_common(self, project_path, selected_modules, client_name)
+        build_common(self, project_path, selected_modules, client_name, modules_dir)
+    }
+
+    fn build_with_log(
+        &self,
+        project_path: &Path,
+        selected_modules: &[String],
+        client_name: &str,
+        modules_dir: &str,
+        log_fn: &dyn Fn(&str),
+    ) -> AppResult<BuildResult> {
+        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, log_fn)
     }
 }
 
@@ -155,15 +203,28 @@ fn is_leap(y: u64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-/// 通用构建流程，供各策略复用
-fn build_common(
+/// 带日志回调的通用构建流程
+///
+/// `log_fn` 在每个关键步骤完成时被调用，用于向前端推送实时日志。
+/// 传入空闭包 `|_|{}` 即可静默执行（单元测试场景）。
+pub fn build_common_with_log(
     strategy: &dyn BuildStrategy,
     project_path: &Path,
     selected_modules: &[String],
     client_name: &str,
+    modules_dir_override: &str,
+    log_fn: &dyn Fn(&str),
 ) -> AppResult<BuildResult> {
     // 1. 验证构建参数
     validate_build_params(client_name, selected_modules)?;
+    log_fn("✓ 参数验证通过");
+
+    // 用户自定义目录优先，为空则使用策略默认值
+    let modules_dir_name = if modules_dir_override.is_empty() {
+        strategy.default_modules_dir()
+    } else {
+        modules_dir_override
+    };
 
     // 风险点1：路径含空格/特殊字符时记录警告（Rust Path API 本身可正确处理）
     let path_str = project_path.to_string_lossy();
@@ -183,6 +244,7 @@ fn build_common(
     // 2. 创建临时目录
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| AppError::BuildError(format!("无法创建临时目录: {}", e)))?;
+    log_fn(&format!("→ 创建临时目录: {}", dist_name));
 
     // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
     let temp_dir_path = temp_dir.clone();
@@ -191,6 +253,11 @@ fn build_common(
     });
 
     // 4. 复制核心文件
+    let core_files_list: Vec<&str> = strategy.core_files().iter()
+        .filter(|&&f| project_path.join(f).exists())
+        .copied()
+        .collect();
+    log_fn(&format!("→ 复制核心文件: {}", core_files_list.join(", ")));
     for &core_item in strategy.core_files() {
         let source = project_path.join(core_item);
         if !source.exists() {
@@ -212,9 +279,10 @@ fn build_common(
                 .map_err(|e| AppError::BuildError(format!("复制文件时出错 - 无法复制 {}: {}", core_item, e)))?;
         }
     }
+    log_fn(&format!("✓ 核心文件复制完成 ({} 个)", core_files_list.len()));
 
     // 5. 创建模块子目录并复制选中的模块
-    let modules_dir_name = strategy.modules_dir();
+    log_fn(&format!("→ 复制模块: {}", selected_modules.join(", ")));
     let modules_dest = temp_dir.join(modules_dir_name);
     std::fs::create_dir_all(&modules_dest)
         .map_err(|e| AppError::BuildError(format!("无法创建 {} 目录: {}", modules_dir_name, e)))?;
@@ -226,6 +294,7 @@ fn build_common(
 
         if module_src.is_dir() {
             copy_dir_recursive(&module_src, &module_dst)?;
+            log_fn(&format!("  ✓ {}", module_name));
         } else {
             // 风险点6：模块目录不存在时记录警告而非静默跳过
             log::warn!(
@@ -233,6 +302,7 @@ fn build_common(
                 module_src.display()
             );
             skipped_modules.push(module_name.clone());
+            log_fn(&format!("  ⚠ 跳过不存在的模块: {}", module_name));
         }
     }
 
@@ -252,10 +322,34 @@ fn build_common(
         );
     }
 
-    // 6. 打包为 ZIP 文件
-    create_zip_from_dir(&temp_dir, &zip_path)?;
+    // 6. 重写入口文件中的模块导入（仅保留选中模块的 import 和 router 注册）
+    // 根据技术栈获取对应的重写器，不支持的技术栈自动跳过
+    if let Some(rewriter) = module_rewriter::get_rewriter(strategy.tech_stack()) {
+        log_fn("→ 重写入口文件 import...");
+        module_rewriter::process_entry_file(
+            rewriter.as_ref(),
+            &temp_dir,
+            selected_modules,
+            modules_dir_name,
+        )?;
+        log_fn("✓ import 重写完成");
 
-    // 7. 返回构建结果（实际打包的模块数 = 选中数 - 跳过数）
+        // 6.5 校验重写后的入口文件导入完整性
+        log_fn("→ 校验导入完整性...");
+        module_rewriter::validate_entry_file(
+            rewriter.as_ref(),
+            &temp_dir,
+            modules_dir_name,
+        )?;
+        log_fn("✓ 导入校验通过");
+    }
+
+    // 7. 打包为 ZIP 文件
+    log_fn(&format!("→ 打包 ZIP ({} 个文件)...", file_count));
+    create_zip_from_dir(&temp_dir, &zip_path)?;
+    log_fn("✓ ZIP 打包完成");
+
+    // 8. 返回构建结果（实际打包的模块数 = 选中数 - 跳过数）
     let module_count = selected_modules.len() - skipped_modules.len();
 
     Ok(BuildResult {
@@ -263,6 +357,17 @@ fn build_common(
         client_name: client_name.trim().to_string(),
         module_count,
     })
+}
+
+/// 无日志版本的通用构建流程（向后兼容，供单元测试和不需要日志的场景使用）
+fn build_common(
+    strategy: &dyn BuildStrategy,
+    project_path: &Path,
+    selected_modules: &[String],
+    client_name: &str,
+    modules_dir_override: &str,
+) -> AppResult<BuildResult> {
+    build_common_with_log(strategy, project_path, selected_modules, client_name, modules_dir_override, &|_| {})
 }
 
 // ============================================================================
@@ -344,7 +449,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string(), "users".to_string()];
-        let result = builder.build(dir.path(), &modules, "测试客户").unwrap();
+        let result = builder.build(dir.path(), &modules, "测试客户", "").unwrap();
 
         assert_eq!(result.client_name, "测试客户");
         assert_eq!(result.module_count, 2);
@@ -368,7 +473,7 @@ mod tests {
 
         let builder = Vue3BuildStrategy;
         let modules = vec!["dashboard".to_string(), "login".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户B").unwrap();
+        let result = builder.build(dir.path(), &modules, "客户B", "").unwrap();
 
         assert_eq!(result.client_name, "客户B");
         assert_eq!(result.module_count, 2);
@@ -411,7 +516,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string()];
-        let result = builder.build(dir.path(), &modules, "");
+        let result = builder.build(dir.path(), &modules, "", "");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("客户名称不能为空"));
     }
@@ -423,7 +528,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules: Vec<String> = vec![];
-        let result = builder.build(dir.path(), &modules, "客户A");
+        let result = builder.build(dir.path(), &modules, "客户A", "");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("至少需要选择一个模块"));
     }
@@ -435,7 +540,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["nonexistent_a".to_string(), "nonexistent_b".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A");
+        let result = builder.build(dir.path(), &modules, "客户A", "");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("所有选中的模块目录均不存在"));
     }
@@ -448,7 +553,7 @@ mod tests {
         let builder = FastApiBuildStrategy;
         // "auth" 存在，"nonexistent" 不存在
         let modules = vec!["auth".to_string(), "nonexistent".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A").unwrap();
+        let result = builder.build(dir.path(), &modules, "客户A", "").unwrap();
         // 实际打包的模块数应为 1（跳过了不存在的模块）
         assert_eq!(result.module_count, 1);
         assert_eq!(result.client_name, "客户A");
@@ -475,7 +580,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A").unwrap();
+        let result = builder.build(dir.path(), &modules, "客户A", "").unwrap();
 
         // ZIP 路径应包含时间戳（dist_客户A_yyyyMMdd_HHmmss.zip）
         assert!(result.zip_path.contains("dist_客户A_"));
