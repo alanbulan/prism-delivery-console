@@ -11,18 +11,27 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useAppStore } from "@/store";
 import type { PageId } from "@/types";
 
-/** 导航项配置（与 Navigator.tsx 中的 NAV_ITEMS 保持一致） */
-const EXPECTED_NAV_ITEMS: Array<{ id: PageId; label: string }> = [
+/** 主导航项配置（与 Navigator.tsx 中的 MAIN_NAV_ITEMS 保持一致） */
+const EXPECTED_MAIN_NAV: Array<{ id: PageId; label: string }> = [
   { id: "projects", label: "项目管理" },
   { id: "build", label: "构建交付" },
+  { id: "analysis", label: "项目分析" },
+];
+
+/** 底部导航项配置（与 Navigator.tsx 中的 BOTTOM_NAV_ITEMS 保持一致） */
+const EXPECTED_BOTTOM_NAV: Array<{ id: PageId; label: string }> = [
   { id: "settings", label: "设置" },
   { id: "about", label: "关于" },
 ];
 
+/** 全部导航项 */
+const ALL_NAV_ITEMS = [...EXPECTED_MAIN_NAV, ...EXPECTED_BOTTOM_NAV];
+
 /** 重置 store 到初始状态 */
 function resetStore() {
   useAppStore.setState({
-    currentPage: "projects",
+    currentPage: "build",
+    sidebarCollapsed: false,
   });
 }
 
@@ -31,28 +40,36 @@ describe("Navigator 导航配置", () => {
     resetStore();
   });
 
-  it("应包含 4 个导航项：项目管理、构建交付、设置、关于（需求 8.1）", () => {
-    expect(EXPECTED_NAV_ITEMS).toHaveLength(4);
-    expect(EXPECTED_NAV_ITEMS.map((item) => item.id)).toEqual([
+  it("主导航应包含 3 项：项目管理、构建交付、项目分析", () => {
+    expect(EXPECTED_MAIN_NAV).toHaveLength(3);
+    expect(EXPECTED_MAIN_NAV.map((item) => item.id)).toEqual([
       "projects",
       "build",
+      "analysis",
+    ]);
+  });
+
+  it("底部导航应包含 2 项：设置、关于", () => {
+    expect(EXPECTED_BOTTOM_NAV).toHaveLength(2);
+    expect(EXPECTED_BOTTOM_NAV.map((item) => item.id)).toEqual([
       "settings",
       "about",
     ]);
   });
 
-  it("每个导航项应有中文标签", () => {
-    for (const item of EXPECTED_NAV_ITEMS) {
-      expect(item.label).toBeTruthy();
-      expect(typeof item.label).toBe("string");
+  it("全部导航项共 5 个，覆盖所有 PageId", () => {
+    const allPageIds: PageId[] = ["projects", "build", "analysis", "settings", "about"];
+    const navIds = ALL_NAV_ITEMS.map((item) => item.id);
+    expect(navIds).toHaveLength(5);
+    for (const pageId of allPageIds) {
+      expect(navIds).toContain(pageId);
     }
   });
 
-  it("导航项 ID 应覆盖所有有效的 PageId 值", () => {
-    const allPageIds: PageId[] = ["projects", "build", "settings", "about"];
-    const navIds = EXPECTED_NAV_ITEMS.map((item) => item.id);
-    for (const pageId of allPageIds) {
-      expect(navIds).toContain(pageId);
+  it("每个导航项应有中文标签", () => {
+    for (const item of ALL_NAV_ITEMS) {
+      expect(item.label).toBeTruthy();
+      expect(typeof item.label).toBe("string");
     }
   });
 });
@@ -63,27 +80,25 @@ describe("Navigator Store 集成", () => {
   });
 
   it("点击导航项应通过 setCurrentPage 切换页面（需求 8.3）", () => {
-    // 模拟点击每个导航项
-    for (const item of EXPECTED_NAV_ITEMS) {
+    for (const item of ALL_NAV_ITEMS) {
       useAppStore.getState().setCurrentPage(item.id);
       expect(useAppStore.getState().currentPage).toBe(item.id);
     }
   });
 
-  it("当前活动页面应与 store.currentPage 一致（需求 8.3）", () => {
-    // 默认页面
-    expect(useAppStore.getState().currentPage).toBe("projects");
-
-    // 切换到构建页面
-    useAppStore.getState().setCurrentPage("build");
+  it("默认应显示构建交付页面", () => {
     expect(useAppStore.getState().currentPage).toBe("build");
-
-    // 切换到设置页面
-    useAppStore.getState().setCurrentPage("settings");
-    expect(useAppStore.getState().currentPage).toBe("settings");
   });
 
-  it("默认应显示项目管理页面（需求 8.4）", () => {
-    expect(useAppStore.getState().currentPage).toBe("projects");
+  it("侧边栏默认展开", () => {
+    expect(useAppStore.getState().sidebarCollapsed).toBe(false);
+  });
+
+  it("toggleSidebar 应切换收展状态", () => {
+    expect(useAppStore.getState().sidebarCollapsed).toBe(false);
+    useAppStore.getState().toggleSidebar();
+    expect(useAppStore.getState().sidebarCollapsed).toBe(true);
+    useAppStore.getState().toggleSidebar();
+    expect(useAppStore.getState().sidebarCollapsed).toBe(false);
   });
 });

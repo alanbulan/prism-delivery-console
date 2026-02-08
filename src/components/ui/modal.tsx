@@ -14,9 +14,11 @@ interface ModalProps {
   children: ReactNode;
   /** 关闭弹窗回调 */
   onClose: () => void;
+  /** 自定义最大宽度 class（默认 max-w-md） */
+  maxWidthClass?: string;
 }
 
-export function Modal({ children, onClose }: ModalProps) {
+export function Modal({ children, onClose, maxWidthClass = "max-w-md" }: ModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* 半透明遮罩 */}
@@ -25,7 +27,7 @@ export function Modal({ children, onClose }: ModalProps) {
         onClick={onClose}
       />
       {/* 弹窗内容 */}
-      <div className="glass-panel relative z-10 w-full max-w-md p-6 shadow-xl">
+      <div className={`glass-panel relative z-10 w-full ${maxWidthClass} overflow-hidden p-6 shadow-xl`}>
         {children}
       </div>
     </div>

@@ -20,7 +20,7 @@ import type { PageId } from "@/types";
 const PAGE_NAME_MAP: Record<PageId, string> = {
   projects: "项目管理",
   build: "构建交付",
-  "quick-build": "快速构建",
+  analysis: "项目分析",
   settings: "设置",
   about: "关于",
 };

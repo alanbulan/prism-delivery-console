@@ -24,7 +24,7 @@ import { TitleBar } from "@/components/TitleBar";
 import { Navigator } from "@/components/Navigator";
 import { ProjectPage } from "@/pages/projects";
 import { BuildPage } from "@/pages/build";
-import { QuickBuildPage } from "@/pages/QuickBuildPage";
+import { AnalysisPage } from "@/pages/analysis";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AboutPage } from "@/pages/AboutPage";
 import type { PageId } from "@/types";
@@ -36,8 +36,8 @@ function PageContent({ pageId }: { pageId: PageId }) {
       return <ProjectPage />;
     case "build":
       return <BuildPage />;
-    case "quick-build":
-      return <QuickBuildPage />;
+    case "analysis":
+      return <AnalysisPage />;
     case "settings":
       return <SettingsPage />;
     case "about":
@@ -68,7 +68,7 @@ export function AppShell() {
 
       {/* 主体区域：侧边栏导航 + 页面内容 */}
       <div className="flex flex-1 overflow-hidden">
-        {/* 侧边栏导航 (w-48) */}
+        {/* 侧边栏导航（宽度随收展状态变化） */}
         <Navigator />
 
         {/* 页面内容区（可滚动） */}

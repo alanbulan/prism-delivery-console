@@ -14,6 +14,7 @@ import { ModuleCard } from "@/components/ModuleCard";
 import { useBuildData } from "./composables/useBuildData";
 import { BuildSelector } from "./components/BuildSelector";
 import { BuildHistory } from "./components/BuildHistory";
+import { BuildLogModal } from "./components/BuildLogModal";
 
 export function BuildPage() {
   const {
@@ -26,15 +27,22 @@ export function BuildPage() {
     selectedClientId,
     scanning,
     buildRecords,
+    buildLogs,
+    showBuildLog,
     setSelectedProjectId,
     setSelectedClientId,
+    setShowBuildLog,
     toggleModule,
     selectAll,
     invertSelection,
     handleBuild,
     handleOpenRecordFolder,
+    handleDeleteRecord,
+    handleClearAllRecords,
+    handlePurgeRecords,
     getClientName,
     getModuleCount,
+    reloadClients,
   } = useBuildData();
 
   // ---- 空状态：无项目 ----
@@ -64,6 +72,7 @@ export function BuildPage() {
           selectedClientId={selectedClientId}
           onProjectChange={setSelectedProjectId}
           onClientChange={setSelectedClientId}
+          onClientCreated={reloadClients}
         />
 
         {/* ---- 模块选择区域 ---- */}
@@ -118,7 +127,7 @@ export function BuildPage() {
 
         {/* ---- 构建按钮 ---- */}
         {selectedProjectId && (
-          <div className="flex justify-start px-1">
+          <div className="flex items-center gap-2 px-1">
             <Button
               onClick={handleBuild}
               disabled={isBuilding || selectedModules.size === 0 || !selectedClientId}
@@ -139,6 +148,15 @@ export function BuildPage() {
           </div>
         )}
 
+        {/* ---- 构建日志模态框 ---- */}
+        {showBuildLog && (
+          <BuildLogModal
+            logs={buildLogs}
+            isBuilding={isBuilding}
+            onClose={() => setShowBuildLog(false)}
+          />
+        )}
+
         {/* ---- 构建历史 ---- */}
         {selectedProjectId && (
           <BuildHistory
@@ -146,6 +164,9 @@ export function BuildPage() {
             getClientName={getClientName}
             getModuleCount={getModuleCount}
             onOpenFolder={handleOpenRecordFolder}
+            onDeleteRecord={handleDeleteRecord}
+            onClearAll={handleClearAllRecords}
+            onPurge={handlePurgeRecords}
           />
         )}
       </main>
