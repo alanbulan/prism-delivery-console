@@ -1,0 +1,72 @@
+# ============================================================================
+# Tauri v2 自动构建与发布工作流
+#
+# 触发条件：推送 v* 格式的 tag（如 v0.2.0）
+# 构建平台：Windows（当前唯一目标平台）
+# 产出物：
+#   - .msi 安装包 + .msi.zip（签名后）
+#   - .nsis 安装包 + .nsis.zip（签名后）
+#   - latest.json（Updater 自动更新清单）
+#
+# 使用前需配置 GitHub Secrets：
+#   - TAURI_SIGNING_PRIVATE_KEY：~/.tauri/prism.key 的内容
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 安装 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      # 3. 安装 Rust 稳定版工具链
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # 4. Rust 编译缓存（加速后续构建）
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # 5. 安装前端依赖
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # 6. 构建 Tauri 应用并发布到 GitHub Releases
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Prism Delivery Console ${{ github.ref_name }}'
+          releaseBody: '查看 [CHANGELOG](https://github.com/alanbulan/prism-delivery-console/blob/main/CHANGELOG.md) 了解详细变更。'
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
