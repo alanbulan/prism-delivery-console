@@ -1,0 +1,185 @@
+import { create } from "zustand";
+import type { ModuleInfo, BuildResult, Category, Project, Client, BuildRecord, PageId } from "./types";
+
+// ============================================================
+// Slice 类型定义 - 按职责拆分状态
+// ============================================================
+
+/** 导航状态 Slice */
+interface NavigationSlice {
+  /** 当前活动页面标识 */
+  currentPage: PageId;
+  /** 设置当前活动页面 */
+  setCurrentPage: (page: PageId) => void;
+}
+
+/** V2 项目管理状态 Slice */
+interface ProjectManagementSlice {
+  /** 项目分类列表 */
+  categories: Category[];
+  /** 项目列表 */
+  projects: Project[];
+  /** 当前选中的项目 ID */
+  selectedProjectId: number | null;
+  /** 客户列表 */
+  clients: Client[];
+  /** 构建历史记录列表 */
+  buildRecords: BuildRecord[];
+
+  /** 设置分类列表 */
+  setCategories: (categories: Category[]) => void;
+  /** 设置项目列表 */
+  setProjects: (projects: Project[]) => void;
+  /** 设置当前选中的项目 ID */
+  setSelectedProjectId: (id: number | null) => void;
+  /** 设置客户列表 */
+  setClients: (clients: Client[]) => void;
+  /** 设置构建历史记录列表 */
+  setBuildRecords: (records: BuildRecord[]) => void;
+  /** 重置 V2 项目管理相关状态 */
+  resetProjectManagement: () => void;
+}
+
+/** V1 快速构建状态 Slice（保留，用于 QuickBuildPage） */
+interface QuickBuildSlice {
+  /** 当前项目根目录路径 */
+  projectPath: string | null;
+  /** 核心架构文件列表（白名单中实际存在的文件） */
+  coreFiles: string[];
+  /** 客户名称，用于命名交付包 */
+  clientName: string;
+
+  /** 设置项目路径和核心文件，同时重置之前的模块选择状态 */
+  setProject: (path: string, coreFiles: string[]) => void;
+  /** 设置客户名称 */
+  setClientName: (name: string) => void;
+}
+
+/** 模块选择状态 Slice（V1/V2 共享） */
+interface ModuleSlice {
+  /** 扫描到的所有业务模块 */
+  modules: ModuleInfo[];
+  /** 当前选中的模块名称集合，使用 Set 实现 O(1) 查找 */
+  selectedModules: Set<string>;
+  /** 是否正在构建中 */
+  isBuilding: boolean;
+  /** 最近一次构建结果 */
+  buildResult: BuildResult | null;
+
+  /** 设置扫描到的模块列表 */
+  setModules: (modules: ModuleInfo[]) => void;
+  /** 切换单个模块的选中状态 */
+  toggleModule: (name: string) => void;
+  /** 全选所有模块 */
+  selectAll: () => void;
+  /** 反选所有模块 */
+  invertSelection: () => void;
+  /** 设置构建中状态 */
+  setBuildingState: (building: boolean) => void;
+  /** 设置构建结果 */
+  setBuildResult: (result: BuildResult | null) => void;
+}
+
+/** 应用全局状态接口 - 由所有 Slice 组合而成 */
+type AppStore = NavigationSlice & ProjectManagementSlice & QuickBuildSlice & ModuleSlice & {
+  /** 重置模块和构建相关状态（不清除项目路径、核心文件和当前页面） */
+  reset: () => void;
+};
+
+// ============================================================
+// Store 实现
+// ============================================================
+
+/**
+ * 全局状态 Store
+ * 使用 Zustand 管理应用状态，按 Slice 模式组织
+ */
+export const useAppStore = create<AppStore>((set, get) => ({
+  // ========== Navigation Slice ==========
+  currentPage: 'projects',
+  setCurrentPage: (page) => set({ currentPage: page }),
+
+  // ========== Project Management Slice (V2) ==========
+  categories: [],
+  projects: [],
+  selectedProjectId: null,
+  clients: [],
+  buildRecords: [],
+
+  setCategories: (categories) => set({ categories }),
+  setProjects: (projects) => set({ projects }),
+  setSelectedProjectId: (id) => set({ selectedProjectId: id }),
+  setClients: (clients) => set({ clients }),
+  setBuildRecords: (records) => set({ buildRecords: records }),
+  resetProjectManagement: () => set({
+    categories: [],
+    projects: [],
+    selectedProjectId: null,
+    clients: [],
+    buildRecords: [],
+  }),
+
+  // ========== Quick Build Slice (V1) ==========
+  projectPath: null,
+  coreFiles: [],
+  clientName: "",
+
+  setProject: (path, coreFiles) => {
+    // 重置模块和构建状态，再设置新项目信息
+    get().reset();
+    set({ projectPath: path, coreFiles });
+  },
+  setClientName: (name) => set({ clientName: name }),
+
+  // ========== Module Slice (共享) ==========
+  modules: [],
+  selectedModules: new Set<string>(),
+  isBuilding: false,
+  buildResult: null,
+
+  setModules: (modules) => set({ modules }),
+
+  /** 切换模块选中状态：选中则取消，未选中则选中 */
+  toggleModule: (name) => set((state) => {
+    const next = new Set(state.selectedModules);
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
+    return { selectedModules: next };
+  }),
+
+  /** 全选：将所有模块加入选中集合 */
+  selectAll: () => set((state) => ({
+    selectedModules: new Set(state.modules.map((m) => m.name)),
+  })),
+
+  /** 反选：翻转每个模块的选中状态 */
+  invertSelection: () => set((state) => {
+    const next = new Set<string>();
+    for (const m of state.modules) {
+      if (!state.selectedModules.has(m.name)) {
+        next.add(m.name);
+      }
+    }
+    return { selectedModules: next };
+  }),
+
+  setBuildingState: (building) => set({ isBuilding: building }),
+  setBuildResult: (result) => set({ buildResult: result }),
+
+  /** 重置模块和构建相关状态，保留项目路径、核心文件和当前页面 */
+  reset: () => set({
+    categories: [],
+    projects: [],
+    selectedProjectId: null,
+    clients: [],
+    buildRecords: [],
+    modules: [],
+    selectedModules: new Set<string>(),
+    clientName: "",
+    isBuilding: false,
+    buildResult: null,
+  }),
+}));

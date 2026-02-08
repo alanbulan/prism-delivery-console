@@ -1,0 +1,235 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================
+   Apple Liquid Glass (WWDC 2026) 浅色主题
+   - 毛玻璃质感、半透明层叠、光影折射效果
+   - 默认浅色模式
+   ============================================ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* ============================================
+   :root - 浅色 Liquid Glass 主题变量
+   柔和的半透明色调，营造玻璃质感的层次深度
+   ============================================ */
+:root {
+  --radius: 0.75rem;
+
+  /* 基础背景：带微蓝色调的浅灰，模拟玻璃折射的冷色调 */
+  --background: oklch(0.98 0.002 250);
+  --foreground: oklch(0.18 0.01 260);
+
+  /* 卡片：半透明白色，模拟磨砂玻璃面板 */
+  --card: oklch(0.99 0.002 250 / 72%);
+  --card-foreground: oklch(0.18 0.01 260);
+
+  /* 弹出层：更高不透明度的玻璃面板 */
+  --popover: oklch(0.99 0.003 250 / 85%);
+  --popover-foreground: oklch(0.18 0.01 260);
+
+  /* 主色调：深蓝灰，带有微妙的蓝色光泽 */
+  --primary: oklch(0.35 0.03 260);
+  --primary-foreground: oklch(0.98 0.002 250);
+
+  /* 次要色：极淡的半透明蓝灰 */
+  --secondary: oklch(0.95 0.005 250 / 65%);
+  --secondary-foreground: oklch(0.25 0.015 260);
+
+  /* 静音色：柔和的灰蓝色调 */
+  --muted: oklch(0.95 0.005 250 / 50%);
+  --muted-foreground: oklch(0.50 0.01 260);
+
+  /* 强调色：淡蓝色玻璃高光 */
+  --accent: oklch(0.94 0.01 250 / 55%);
+  --accent-foreground: oklch(0.25 0.015 260);
+
+  /* 危险色 */
+  --destructive: oklch(0.577 0.245 27.325);
+
+  /* 边框：极淡的半透明线条，模拟玻璃边缘的光线折射 */
+  --border: oklch(0.88 0.005 250 / 50%);
+  --input: oklch(0.92 0.005 250 / 60%);
+  --ring: oklch(0.65 0.04 250 / 40%);
+
+  /* 图表色 */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+
+  /* 侧边栏：略深的半透明玻璃面板 */
+  --sidebar: oklch(0.97 0.003 250 / 70%);
+  --sidebar-foreground: oklch(0.18 0.01 260);
+  --sidebar-primary: oklch(0.35 0.03 260);
+  --sidebar-primary-foreground: oklch(0.98 0.002 250);
+  --sidebar-accent: oklch(0.94 0.01 250 / 55%);
+  --sidebar-accent-foreground: oklch(0.25 0.015 260);
+  --sidebar-border: oklch(0.88 0.005 250 / 40%);
+  --sidebar-ring: oklch(0.65 0.04 250 / 40%);
+
+  /* ============================================
+     Liquid Glass 专用变量
+     用于毛玻璃效果的统一配置
+     ============================================ */
+
+  /* 毛玻璃模糊强度 */
+  --glass-blur-sm: 8px;
+  --glass-blur: 16px;
+  --glass-blur-lg: 24px;
+  --glass-blur-xl: 40px;
+
+  /* 玻璃面板背景色（半透明白色） */
+  --glass-bg: oklch(1 0 0 / 45%);
+  --glass-bg-strong: oklch(1 0 0 / 65%);
+  --glass-bg-subtle: oklch(1 0 0 / 25%);
+
+  /* 玻璃边框：模拟光线折射的高光边缘 */
+  --glass-border: oklch(1 0 0 / 50%);
+  --glass-border-strong: oklch(1 0 0 / 70%);
+
+  /* 玻璃阴影：柔和的投影营造悬浮感 */
+  --glass-shadow: 0 2px 16px oklch(0.3 0.01 260 / 8%),
+                  0 1px 4px oklch(0.3 0.01 260 / 5%);
+  --glass-shadow-lg: 0 4px 32px oklch(0.3 0.01 260 / 12%),
+                     0 2px 8px oklch(0.3 0.01 260 / 6%);
+
+  /* 玻璃内发光：顶部高光模拟光线折射 */
+  --glass-highlight: inset 0 1px 0 oklch(1 0 0 / 60%);
+}
+
+/* ============================================
+   暗色模式变量（保留但非默认）
+   ============================================ */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ============================================
+   基础层样式
+   ============================================ */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* 禁止文本选中拖拽（桌面应用体验优化） */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ============================================
+   Liquid Glass 工具类
+   提供三级毛玻璃效果，用于不同层级的 UI 元素
+   ============================================ */
+@layer utilities {
+  /* 基础玻璃卡片效果
+     适用于：卡片、模块选择项、信息面板
+     效果：中等模糊 + 半透明背景 + 高光边框 + 柔和阴影 */
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), var(--glass-highlight);
+    border-radius: var(--radius-lg);
+  }
+
+  /* 面板级玻璃效果
+     适用于：侧边栏、导航栏、主要容器面板
+     效果：更强模糊 + 更高不透明度 + 更明显的阴影层次 */
+  .glass-panel {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(var(--glass-blur-lg));
+    -webkit-backdrop-filter: blur(var(--glass-blur-lg));
+    border: 1px solid var(--glass-border-strong);
+    box-shadow: var(--glass-shadow-lg), var(--glass-highlight);
+    border-radius: var(--radius-xl);
+  }
+
+  /* 微妙玻璃提示效果
+     适用于：悬浮状态、次要元素、背景装饰
+     效果：轻微模糊 + 低透明度背景 + 细微边框 */
+  .glass-subtle {
+    background: var(--glass-bg-subtle);
+    backdrop-filter: blur(var(--glass-blur-sm));
+    -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+    border: 1px solid oklch(1 0 0 / 30%);
+    border-radius: var(--radius-md);
+  }
+}
