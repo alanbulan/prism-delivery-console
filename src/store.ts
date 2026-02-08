@@ -83,7 +83,7 @@ type AppStore = NavigationSlice & ProjectManagementSlice & ModuleSlice & {
  * 全局状态 Store
  * 使用 Zustand 管理应用状态，按 Slice 模式组织
  */
-export const useAppStore = create<AppStore>((set, get) => ({
+export const useAppStore = create<AppStore>((set) => ({
   // ========== Navigation Slice ==========
   currentPage: 'build',
   sidebarCollapsed: false,
