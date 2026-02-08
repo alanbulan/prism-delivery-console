@@ -11,15 +11,13 @@ use std::path::Path;
 use crate::models::dtos::BuildResult;
 use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
 use crate::services::CORE_FILES;
+use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
 // 构建策略 Trait 定义
 // ============================================================================
 
 /// 技术栈构建策略 trait
-///
-/// 不同技术栈的项目有不同的核心文件和模块目录结构，
-/// 通过实现此 trait 来定义各自的构建打包逻辑。
 pub trait BuildStrategy {
     /// 获取该技术栈的核心文件列表
     fn core_files(&self) -> &[&str];
@@ -28,21 +26,12 @@ pub trait BuildStrategy {
     fn modules_dir(&self) -> &str;
 
     /// 执行构建打包
-    ///
-    /// # 参数
-    /// - `project_path`: 项目根目录路径
-    /// - `selected_modules`: 用户选中的模块名称列表
-    /// - `client_name`: 客户名称，用于命名交付包
-    ///
-    /// # 返回
-    /// - `Ok(BuildResult)`: 构建成功，返回 ZIP 路径和模块数量
-    /// - `Err(String)`: 中文错误描述
     fn build(
         &self,
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
-    ) -> Result<BuildResult, String>;
+    ) -> AppResult<BuildResult>;
 }
 
 // ============================================================================
@@ -66,10 +55,11 @@ impl BuildStrategy for FastApiBuildStrategy {
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
-    ) -> Result<BuildResult, String> {
+    ) -> AppResult<BuildResult> {
         build_common(self, project_path, selected_modules, client_name)
     }
 }
+
 
 // ============================================================================
 // Vue3 构建策略
@@ -100,7 +90,7 @@ impl BuildStrategy for Vue3BuildStrategy {
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
-    ) -> Result<BuildResult, String> {
+    ) -> AppResult<BuildResult> {
         build_common(self, project_path, selected_modules, client_name)
     }
 }
@@ -115,7 +105,7 @@ fn build_common(
     project_path: &Path,
     selected_modules: &[String],
     client_name: &str,
-) -> Result<BuildResult, String> {
+) -> AppResult<BuildResult> {
     // 1. 验证构建参数
     validate_build_params(client_name, selected_modules)?;
 
@@ -124,7 +114,8 @@ fn build_common(
     let zip_path = project_path.join(format!("{}.zip", dist_name));
 
     // 2. 创建临时目录
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("构建失败：无法创建临时目录: {}", e))?;
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| AppError::BuildError(format!("无法创建临时目录: {}", e)))?;
 
     // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
     let temp_dir_path = temp_dir.clone();
@@ -148,10 +139,10 @@ fn build_common(
             // 确保父目录存在（处理嵌套路径如 "src/views"）
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("构建失败：无法创建目录 {}: {}", parent.display(), e))?;
+                    .map_err(|e| AppError::BuildError(format!("无法创建目录 {}: {}", parent.display(), e)))?;
             }
             std::fs::copy(&source, &dest)
-                .map_err(|e| format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e))?;
+                .map_err(|e| AppError::BuildError(format!("复制文件时出错 - 无法复制 {}: {}", core_item, e)))?;
         }
     }
 
@@ -159,7 +150,7 @@ fn build_common(
     let modules_dir_name = strategy.modules_dir();
     let modules_dest = temp_dir.join(modules_dir_name);
     std::fs::create_dir_all(&modules_dest)
-        .map_err(|e| format!("构建失败：无法创建 {} 目录: {}", modules_dir_name, e))?;
+        .map_err(|e| AppError::BuildError(format!("无法创建 {} 目录: {}", modules_dir_name, e)))?;
 
     for module_name in selected_modules {
         let module_src = project_path.join(modules_dir_name).join(module_name);
@@ -188,13 +179,14 @@ fn build_common(
 // ============================================================================
 
 /// 根据技术栈类型获取对应的构建策略
-pub fn get_builder(tech_stack: &str) -> Result<Box<dyn BuildStrategy>, String> {
+pub fn get_builder(tech_stack: &str) -> AppResult<Box<dyn BuildStrategy>> {
     match tech_stack {
         "fastapi" => Ok(Box::new(FastApiBuildStrategy)),
         "vue3" => Ok(Box::new(Vue3BuildStrategy)),
-        _ => Err(format!("不支持的技术栈类型：{}", tech_stack)),
+        _ => Err(AppError::UnsupportedTechStack(tech_stack.to_string())),
     }
 }
+
 
 // ============================================================================
 // 单元测试
@@ -218,23 +210,11 @@ mod tests {
         fs::create_dir_all(root.join("utils")).unwrap();
         fs::write(root.join("utils").join("helpers.py"), "# 工具").unwrap();
         fs::create_dir_all(root.join("modules").join("auth")).unwrap();
-        fs::write(
-            root.join("modules").join("auth").join("routes.py"),
-            "# 认证",
-        )
-        .unwrap();
+        fs::write(root.join("modules").join("auth").join("routes.py"), "# 认证").unwrap();
         fs::create_dir_all(root.join("modules").join("billing")).unwrap();
-        fs::write(
-            root.join("modules").join("billing").join("routes.py"),
-            "# 计费",
-        )
-        .unwrap();
+        fs::write(root.join("modules").join("billing").join("routes.py"), "# 计费").unwrap();
         fs::create_dir_all(root.join("modules").join("users")).unwrap();
-        fs::write(
-            root.join("modules").join("users").join("routes.py"),
-            "# 用户",
-        )
-        .unwrap();
+        fs::write(root.join("modules").join("users").join("routes.py"), "# 用户").unwrap();
     }
 
     fn create_vue3_project(dir: &TempDir) {
@@ -245,22 +225,14 @@ mod tests {
         fs::write(root.join("index.html"), "<html></html>").unwrap();
         fs::create_dir_all(root.join("src").join("views").join("dashboard")).unwrap();
         fs::write(
-            root.join("src")
-                .join("views")
-                .join("dashboard")
-                .join("index.vue"),
+            root.join("src").join("views").join("dashboard").join("index.vue"),
             "<template>Dashboard</template>",
-        )
-        .unwrap();
+        ).unwrap();
         fs::create_dir_all(root.join("src").join("views").join("login")).unwrap();
         fs::write(
-            root.join("src")
-                .join("views")
-                .join("login")
-                .join("index.vue"),
+            root.join("src").join("views").join("login").join("index.vue"),
             "<template>Login</template>",
-        )
-        .unwrap();
+        ).unwrap();
     }
 
     fn read_zip_entries(zip_path: &Path) -> Vec<String> {
@@ -350,7 +322,7 @@ mod tests {
         let modules = vec!["auth".to_string()];
         let result = builder.build(dir.path(), &modules, "");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("客户名称不能为空"));
+        assert!(result.unwrap_err().to_string().contains("客户名称不能为空"));
     }
 
     #[test]
@@ -362,6 +334,6 @@ mod tests {
         let modules: Vec<String> = vec![];
         let result = builder.build(dir.path(), &modules, "客户A");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("至少需要选择一个模块"));
+        assert!(result.unwrap_err().to_string().contains("至少需要选择一个模块"));
     }
 }

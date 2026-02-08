@@ -5,35 +5,29 @@
 
 use crate::models::dtos::ModuleInfo;
 use crate::services::{CORE_FILES, IGNORED_ENTRIES};
+use crate::utils::error::{AppError, AppResult};
 
 /// 验证项目文件夹结构并扫描核心文件
 ///
 /// 检查指定路径下是否包含 `main.py` 文件和 `modules/` 目录，
 /// 并扫描核心文件白名单中实际存在的文件/目录。
-///
-/// # 参数
-/// - `path`: 项目根目录路径
-///
-/// # 返回
-/// - `Ok(Vec<String>)`: 白名单中实际存在的核心文件列表
-/// - `Err(String)`: 中文错误描述，说明缺少哪些必要项
-pub fn validate_project(path: &std::path::Path) -> Result<Vec<String>, String> {
-    // 检查 main.py 和 modules/ 是否存在
+pub fn validate_project(path: &std::path::Path) -> AppResult<Vec<String>> {
     let has_main_py = path.join("main.py").exists();
     let has_modules = path.join("modules").is_dir();
 
-    // 根据缺失情况返回对应的中文错误信息
     match (has_main_py, has_modules) {
         (false, false) => {
-            return Err("项目验证失败：缺少 main.py 文件和 modules/ 目录".to_string());
+            return Err(AppError::ValidationError(
+                "缺少 main.py 文件和 modules/ 目录".to_string(),
+            ));
         }
         (false, true) => {
-            return Err("项目验证失败：缺少 main.py 文件".to_string());
+            return Err(AppError::ValidationError("缺少 main.py 文件".to_string()));
         }
         (true, false) => {
-            return Err("项目验证失败：缺少 modules/ 目录".to_string());
+            return Err(AppError::ValidationError("缺少 modules/ 目录".to_string()));
         }
-        (true, true) => {} // 验证通过，继续扫描核心文件
+        (true, true) => {} // 验证通过
     }
 
     // 扫描核心文件白名单中实际存在的文件/目录
@@ -41,7 +35,6 @@ pub fn validate_project(path: &std::path::Path) -> Result<Vec<String>, String> {
         .iter()
         .filter(|&name| {
             let full_path = path.join(name);
-            // 目录类型（以 / 结尾）检查 is_dir，文件类型检查 exists
             if name.ends_with('/') {
                 full_path.is_dir()
             } else {
@@ -55,29 +48,14 @@ pub fn validate_project(path: &std::path::Path) -> Result<Vec<String>, String> {
 }
 
 /// 扫描 modules 目录下的一级子目录，过滤忽略条目
-///
-/// 读取指定目录下的所有条目，仅保留目录类型且不在忽略列表中的条目，
-/// 按名称排序后返回模块信息列表。
-///
-/// # 参数
-/// - `modules_path`: modules 目录的路径
-///
-/// # 返回
-/// - `Ok(Vec<ModuleInfo>)`: 按名称排序的模块信息列表
-/// - `Err(String)`: 中文错误描述
-pub fn scan_modules_dir(modules_path: &std::path::Path) -> Result<Vec<ModuleInfo>, String> {
-    // 读取目录条目，失败时返回中文错误信息
+pub fn scan_modules_dir(modules_path: &std::path::Path) -> AppResult<Vec<ModuleInfo>> {
     let entries = std::fs::read_dir(modules_path)
-        .map_err(|_| "模块扫描失败：无法读取 modules/ 目录".to_string())?;
+        .map_err(|_| AppError::ScanError("无法读取 modules/ 目录".to_string()))?;
 
     let mut modules: Vec<ModuleInfo> = entries
         .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
         .filter(|entry| {
-            // 仅保留目录类型的条目
-            entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
-        })
-        .filter(|entry| {
-            // 过滤掉忽略列表中的条目
             let name = entry.file_name().to_string_lossy().to_string();
             !IGNORED_ENTRIES.contains(&name.as_str())
         })
@@ -88,11 +66,11 @@ pub fn scan_modules_dir(modules_path: &std::path::Path) -> Result<Vec<ModuleInfo
         })
         .collect();
 
-    // 按名称排序，确保返回结果顺序一致
     modules.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(modules)
 }
+
 
 // ============================================================================
 // 单元测试
@@ -104,7 +82,6 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// 辅助函数：创建一个有效的项目目录（包含 main.py 和 modules/）
     fn create_valid_project(dir: &TempDir) {
         fs::write(dir.path().join("main.py"), "# FastAPI main").unwrap();
         fs::create_dir(dir.path().join("modules")).unwrap();
@@ -128,7 +105,7 @@ mod tests {
 
         let result = validate_project(dir.path());
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "项目验证失败：缺少 main.py 文件");
+        assert!(result.unwrap_err().to_string().contains("缺少 main.py 文件"));
     }
 
     #[test]
@@ -138,7 +115,7 @@ mod tests {
 
         let result = validate_project(dir.path());
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "项目验证失败：缺少 modules/ 目录");
+        assert!(result.unwrap_err().to_string().contains("缺少 modules/ 目录"));
     }
 
     #[test]
@@ -147,10 +124,9 @@ mod tests {
 
         let result = validate_project(dir.path());
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "项目验证失败：缺少 main.py 文件和 modules/ 目录"
-        );
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("缺少 main.py 文件"));
+        assert!(err.contains("modules/ 目录"));
     }
 
     #[test]

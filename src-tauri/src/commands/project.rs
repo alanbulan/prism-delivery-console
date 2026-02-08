@@ -30,7 +30,8 @@ pub async fn open_project(app: tauri::AppHandle) -> Result<ProjectInfo, String> 
         .ok_or_else(|| "项目验证失败：无法解析所选文件夹路径".to_string())?;
 
     // 调用 services 层验证项目结构并扫描核心文件
-    let core_files = scanner::validate_project(path)?;
+    let core_files = scanner::validate_project(path)
+        .map_err(|e| e.to_string())?;
 
     Ok(ProjectInfo {
         path: path.to_string_lossy().to_string(),
@@ -44,7 +45,7 @@ pub async fn open_project(app: tauri::AppHandle) -> Result<ProjectInfo, String> 
 #[tauri::command]
 pub async fn scan_modules(project_path: String) -> Result<Vec<ModuleInfo>, String> {
     let modules_path = std::path::Path::new(&project_path).join("modules");
-    scanner::scan_modules_dir(&modules_path)
+    scanner::scan_modules_dir(&modules_path).map_err(|e| e.to_string())
 }
 
 /// 扫描项目模块（多技术栈支持）
@@ -59,6 +60,6 @@ pub async fn scan_project_modules(
     project_path: String,
     tech_stack: String,
 ) -> Result<Vec<ModuleInfo>, String> {
-    let scanner = scan_strategy::get_scanner(&tech_stack)?;
-    scanner.scan(std::path::Path::new(&project_path))
+    let scanner = scan_strategy::get_scanner(&tech_stack).map_err(|e| e.to_string())?;
+    scanner.scan(std::path::Path::new(&project_path)).map_err(|e| e.to_string())
 }

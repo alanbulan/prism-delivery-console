@@ -3,83 +3,27 @@
 // 负责：构建交付包（含多技术栈）、打开文件夹
 // ============================================================================
 
-use std::path::Path;
-
 use crate::models::dtos::BuildResult;
-use crate::services::build_strategy;
-use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
-use crate::services::CORE_FILES;
+use crate::services::build_strategy::{self, BuildStrategy};
 
-/// 构建交付包：复制核心文件和选中模块，打包为 ZIP
+/// 构建交付包（V1 兼容接口）：委托给 FastAPI 构建策略
 ///
-/// 验证参数后，在项目目录下创建临时目录，复制核心文件和选中模块，
-/// 打包为 ZIP 文件，最后清理临时目录。使用 scopeguard 确保清理。
+/// 此命令保留为 QuickBuildPage 的后端接口，内部直接复用
+/// FastApiBuildStrategy 的构建逻辑，消除重复代码。
 #[tauri::command]
 pub async fn build_package(
     project_path: String,
     selected_modules: Vec<String>,
     client_name: String,
 ) -> Result<BuildResult, String> {
-    // 1. 验证构建参数
-    validate_build_params(&client_name, &selected_modules)?;
-
-    let project_dir = Path::new(&project_path);
-    let dist_name = format!("dist_{}", client_name.trim());
-    let temp_dir = project_dir.join(&dist_name);
-    let zip_path = project_dir.join(format!("{}.zip", dist_name));
-
-    // 2. 创建临时目录
-    std::fs::create_dir_all(&temp_dir).map_err(|_| "构建失败：无法创建临时目录".to_string())?;
-
-    // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
-    let temp_dir_path = temp_dir.clone();
-    let _guard = scopeguard::guard((), |_| {
-        let _ = std::fs::remove_dir_all(&temp_dir_path);
-    });
-
-    // 4. 复制 Core_Files 白名单中的文件和目录
-    for &core_item in CORE_FILES {
-        let source = project_dir.join(core_item);
-        if !source.exists() {
-            continue;
-        }
-
-        if source.is_dir() {
-            let dir_name = core_item.trim_end_matches('/');
-            let dest = temp_dir.join(dir_name);
-            copy_dir_recursive(&source, &dest)?;
-        } else {
-            let dest = temp_dir.join(core_item);
-            std::fs::copy(&source, &dest)
-                .map_err(|e| format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e))?;
-        }
-    }
-
-    // 5. 创建 modules/ 子目录并复制选中的模块
-    let modules_dest = temp_dir.join("modules");
-    std::fs::create_dir_all(&modules_dest)
-        .map_err(|e| format!("构建失败：复制文件时出错 - 无法创建 modules 目录: {}", e))?;
-
-    for module_name in &selected_modules {
-        let module_src = project_dir.join("modules").join(module_name);
-        let module_dst = modules_dest.join(module_name);
-
-        if module_src.is_dir() {
-            copy_dir_recursive(&module_src, &module_dst)?;
-        }
-    }
-
-    // 6. 打包为 ZIP 文件
-    create_zip_from_dir(&temp_dir, &zip_path)?;
-
-    // 7. 返回构建结果
-    let module_count = selected_modules.len();
-
-    Ok(BuildResult {
-        zip_path: zip_path.to_string_lossy().to_string(),
-        client_name: client_name.trim().to_string(),
-        module_count,
-    })
+    // 直接委托给 FastAPI 构建策略（V1 仅支持 FastAPI 项目）
+    let builder = build_strategy::FastApiBuildStrategy;
+    builder.build(
+        std::path::Path::new(&project_path),
+        &selected_modules,
+        &client_name,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// 构建项目交付包（多技术栈支持）
@@ -94,12 +38,13 @@ pub async fn build_project_package(
     client_name: String,
     tech_stack: String,
 ) -> Result<BuildResult, String> {
-    let builder = build_strategy::get_builder(&tech_stack)?;
+    let builder = build_strategy::get_builder(&tech_stack).map_err(|e| e.to_string())?;
     builder.build(
         std::path::Path::new(&project_path),
         &selected_modules,
         &client_name,
     )
+    .map_err(|e| e.to_string())
 }
 
 /// 打开文件夹：在系统文件管理器中打开指定路径（并选中该文件）

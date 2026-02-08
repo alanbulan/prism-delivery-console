@@ -12,8 +12,8 @@ use thiserror::Error;
 /// （Tauri command 要求返回 `Result<T, String>`）。
 #[derive(Debug, Error)]
 pub enum AppError {
-    /// 项目验证失败（如缺少 main.py 或 modules/ 目录）
-    #[error("项目验证失败：{0}")]
+    /// 参数验证失败（如客户名称为空、未选择模块）
+    #[error("验证失败：{0}")]
     ValidationError(String),
 
     /// 构建过程中的错误（如文件复制、ZIP 打包失败）
@@ -28,6 +28,10 @@ pub enum AppError {
     #[error("IO 错误：{0}")]
     IoError(#[from] std::io::Error),
 
+    /// 数据库操作错误
+    #[error("{0}")]
+    DatabaseError(String),
+
     /// 不支持的技术栈类型
     #[error("不支持的技术栈类型：{0}")]
     UnsupportedTechStack(String),
@@ -40,6 +44,9 @@ pub enum AppError {
     #[error("打开文件夹失败：{0}")]
     OpenFolderError(String),
 }
+
+/// 便捷类型别名，统一项目内的 Result 签名
+pub type AppResult<T> = Result<T, AppError>;
 
 /// 将 AppError 转换为 String，保持与 Tauri command 返回类型的兼容性
 ///

@@ -6,75 +6,67 @@
 use std::io::Write;
 use std::path::Path;
 
+use crate::utils::error::{AppError, AppResult};
+
 /// 验证构建参数：客户名称非空且至少选中一个模块
-///
-/// # 参数
-/// - `client_name`: 客户名称
-/// - `selected_modules`: 用户选中的模块列表
-///
-/// # 返回
-/// - `Ok(())`: 验证通过
-/// - `Err(String)`: 中文错误描述
-pub fn validate_build_params(client_name: &str, selected_modules: &[String]) -> Result<(), String> {
+pub fn validate_build_params(client_name: &str, selected_modules: &[String]) -> AppResult<()> {
     let name_empty = client_name.trim().is_empty();
     let no_modules = selected_modules.is_empty();
 
     match (name_empty, no_modules) {
-        (true, true) => Err("构建验证失败：客户名称不能为空且至少需要选择一个模块".to_string()),
-        (true, false) => Err("构建验证失败：客户名称不能为空".to_string()),
-        (false, true) => Err("构建验证失败：至少需要选择一个模块".to_string()),
+        (true, true) => Err(AppError::ValidationError(
+            "客户名称不能为空且至少需要选择一个模块".to_string(),
+        )),
+        (true, false) => Err(AppError::ValidationError(
+            "客户名称不能为空".to_string(),
+        )),
+        (false, true) => Err(AppError::ValidationError(
+            "至少需要选择一个模块".to_string(),
+        )),
         (false, false) => Ok(()),
     }
 }
 
 /// 递归复制目录及其所有内容到目标路径
-///
-/// # 参数
-/// - `src`: 源目录路径
-/// - `dst`: 目标目录路径
-///
-/// # 返回
-/// - `Ok(())`: 复制成功
-/// - `Err(String)`: 中文错误描述
-pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+pub fn copy_dir_recursive(src: &Path, dst: &Path) -> AppResult<()> {
     // 创建目标目录
     std::fs::create_dir_all(dst).map_err(|e| {
-        format!(
-            "构建失败：复制文件时出错 - 无法创建目录 {}: {}",
+        AppError::BuildError(format!(
+            "复制文件时出错 - 无法创建目录 {}: {}",
             dst.display(),
             e
-        )
+        ))
     })?;
 
     // 使用 walkdir 遍历源目录
     for entry in walkdir::WalkDir::new(src) {
-        let entry = entry.map_err(|e| format!("构建失败：复制文件时出错 - 遍历目录失败: {}", e))?;
+        let entry = entry.map_err(|e| {
+            AppError::BuildError(format!("复制文件时出错 - 遍历目录失败: {}", e))
+        })?;
 
         // 计算相对路径并拼接到目标路径
         let relative_path = entry
             .path()
             .strip_prefix(src)
-            .map_err(|e| format!("构建失败：复制文件时出错 - 路径处理失败: {}", e))?;
+            .map_err(|e| AppError::BuildError(format!("复制文件时出错 - 路径处理失败: {}", e)))?;
         let target_path = dst.join(relative_path);
 
         if entry.file_type().is_dir() {
-            // 创建对应的目录结构
             std::fs::create_dir_all(&target_path).map_err(|e| {
-                format!(
-                    "构建失败：复制文件时出错 - 无法创建目录 {}: {}",
+                AppError::BuildError(format!(
+                    "复制文件时出错 - 无法创建目录 {}: {}",
                     target_path.display(),
                     e
-                )
+                ))
             })?;
         } else {
-            // 复制文件
             std::fs::copy(entry.path(), &target_path).map_err(|e| {
-                format!(
-                    "构建失败：复制文件时出错 - 无法复制 {} 到 {}: {}",
+                AppError::BuildError(format!(
+                    "复制文件时出错 - 无法复制 {} 到 {}: {}",
                     entry.path().display(),
                     target_path.display(),
                     e
-                )
+                ))
             })?;
         }
     }
@@ -83,34 +75,23 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 /// 将目录内容打包为 ZIP 文件
-///
-/// # 参数
-/// - `src_dir`: 要打包的源目录路径
-/// - `zip_path`: 输出 ZIP 文件的路径
-///
-/// # 返回
-/// - `Ok(())`: 打包成功
-/// - `Err(String)`: 中文错误描述
-pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> Result<(), String> {
-    // 创建 ZIP 文件
+pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> AppResult<()> {
     let file = std::fs::File::create(zip_path)
-        .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 无法创建 ZIP 文件: {}", e))?;
+        .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 无法创建 ZIP 文件: {}", e)))?;
     let mut zip_writer = zip::ZipWriter::new(file);
 
     // 设置 ZIP 压缩选项（使用 Deflated 压缩）
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
-    // 使用 walkdir 遍历源目录中的所有文件
     for entry in walkdir::WalkDir::new(src_dir) {
-        let entry =
-            entry.map_err(|e| format!("构建失败：打包 ZIP 时出错 - 遍历目录失败: {}", e))?;
+        let entry = entry
+            .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 遍历目录失败: {}", e)))?;
 
         let path = entry.path();
-        // 计算相对于源目录的路径，作为 ZIP 内的文件名
         let relative_path = path
             .strip_prefix(src_dir)
-            .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 路径处理失败: {}", e))?;
+            .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 路径处理失败: {}", e)))?;
 
         // 跳过根目录本身
         if relative_path.as_os_str().is_empty() {
@@ -121,30 +102,28 @@ pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> Result<(), String
         let zip_entry_name = relative_path.to_string_lossy().replace('\\', "/");
 
         if path.is_dir() {
-            // 添加目录条目（以 / 结尾）
             zip_writer
                 .add_directory(format!("{}/", zip_entry_name), options)
-                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 添加目录失败: {}", e))?;
+                .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 添加目录失败: {}", e)))?;
         } else {
-            // 添加文件条目
             zip_writer
                 .start_file(&zip_entry_name, options)
-                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 添加文件失败: {}", e))?;
+                .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 添加文件失败: {}", e)))?;
             let content = std::fs::read(path)
-                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 读取文件失败: {}", e))?;
+                .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 读取文件失败: {}", e)))?;
             zip_writer
                 .write_all(&content)
-                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 写入文件失败: {}", e))?;
+                .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 写入文件失败: {}", e)))?;
         }
     }
 
-    // 完成 ZIP 写入
     zip_writer
         .finish()
-        .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 完成写入失败: {}", e))?;
+        .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 完成写入失败: {}", e)))?;
 
     Ok(())
 }
+
 
 // ============================================================================
 // 单元测试
@@ -168,7 +147,7 @@ mod tests {
         let modules = vec!["auth".to_string()];
         let result = validate_build_params("", &modules);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("客户名称不能为空"));
+        assert!(result.unwrap_err().to_string().contains("客户名称不能为空"));
     }
 
     #[test]
@@ -176,7 +155,7 @@ mod tests {
         let modules = vec!["auth".to_string()];
         let result = validate_build_params("   ", &modules);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("客户名称不能为空"));
+        assert!(result.unwrap_err().to_string().contains("客户名称不能为空"));
     }
 
     #[test]
@@ -184,7 +163,7 @@ mod tests {
         let modules: Vec<String> = vec![];
         let result = validate_build_params("客户A", &modules);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("至少需要选择一个模块"));
+        assert!(result.unwrap_err().to_string().contains("至少需要选择一个模块"));
     }
 
     #[test]
@@ -192,7 +171,7 @@ mod tests {
         let modules: Vec<String> = vec![];
         let result = validate_build_params("", &modules);
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(err.contains("客户名称不能为空"));
         assert!(err.contains("至少需要选择一个模块"));
     }
