@@ -20,6 +20,22 @@ export interface ChangelogEntry {
 /** 版本更新历史（最新在前，新版本在此数组头部添加即可） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.0",
+    date: "2026-02-08",
+    changes: [
+      "新增项目分析模块（文件索引 + 依赖拓扑 + 语义搜索 + AI 报告）",
+      "新增 D3.js 力导向图 / 树形依赖拓扑可视化",
+      "新增 Embedding 向量搜索（SQLite BLOB + 余弦相似度）",
+      "新增静态签名提取 + LLM 项目报告生成",
+      "构建系统增强：实时日志推送 + 可配置 modules 目录",
+      "新增 import 路径重写器（FastAPI / Vue3）",
+      "新增构建日志弹窗 + 构建历史管理（删除/清理）",
+      "新增客户模块配置持久化 + 版本号自动递增",
+      "设置页增强：LLM/Embedding 模型配置 + 自动索引",
+      "侧边栏导航重构 + 废弃页面清理",
+    ],
+  },
+  {
     version: "0.2.0",
     date: "2026-02-08",
     changes: [

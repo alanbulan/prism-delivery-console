@@ -377,7 +377,7 @@ export function AboutPage() {
                   项目信息
                 </h3>
               </div>
-              <p className="text-sm text-muted-foreground">内部工具 · 私有项目</p>
+              <p className="text-sm text-muted-foreground">MIT License · 开源项目</p>
             </section>
           </div>
 
