@@ -124,8 +124,7 @@ fn build_common(
     let zip_path = project_path.join(format!("{}.zip", dist_name));
 
     // 2. 创建临时目录
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("构建失败：无法创建临时目录: {}", e))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("构建失败：无法创建临时目录: {}", e))?;
 
     // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
     let temp_dir_path = temp_dir.clone();
@@ -148,22 +147,19 @@ fn build_common(
             let dest = temp_dir.join(core_item);
             // 确保父目录存在（处理嵌套路径如 "src/views"）
             if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    format!("构建失败：无法创建目录 {}: {}", parent.display(), e)
-                })?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("构建失败：无法创建目录 {}: {}", parent.display(), e))?;
             }
-            std::fs::copy(&source, &dest).map_err(|e| {
-                format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e)
-            })?;
+            std::fs::copy(&source, &dest)
+                .map_err(|e| format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e))?;
         }
     }
 
     // 5. 创建模块子目录并复制选中的模块
     let modules_dir_name = strategy.modules_dir();
     let modules_dest = temp_dir.join(modules_dir_name);
-    std::fs::create_dir_all(&modules_dest).map_err(|e| {
-        format!("构建失败：无法创建 {} 目录: {}", modules_dir_name, e)
-    })?;
+    std::fs::create_dir_all(&modules_dest)
+        .map_err(|e| format!("构建失败：无法创建 {} 目录: {}", modules_dir_name, e))?;
 
     for module_name in selected_modules {
         let module_src = project_path.join(modules_dir_name).join(module_name);
@@ -222,11 +218,23 @@ mod tests {
         fs::create_dir_all(root.join("utils")).unwrap();
         fs::write(root.join("utils").join("helpers.py"), "# 工具").unwrap();
         fs::create_dir_all(root.join("modules").join("auth")).unwrap();
-        fs::write(root.join("modules").join("auth").join("routes.py"), "# 认证").unwrap();
+        fs::write(
+            root.join("modules").join("auth").join("routes.py"),
+            "# 认证",
+        )
+        .unwrap();
         fs::create_dir_all(root.join("modules").join("billing")).unwrap();
-        fs::write(root.join("modules").join("billing").join("routes.py"), "# 计费").unwrap();
+        fs::write(
+            root.join("modules").join("billing").join("routes.py"),
+            "# 计费",
+        )
+        .unwrap();
         fs::create_dir_all(root.join("modules").join("users")).unwrap();
-        fs::write(root.join("modules").join("users").join("routes.py"), "# 用户").unwrap();
+        fs::write(
+            root.join("modules").join("users").join("routes.py"),
+            "# 用户",
+        )
+        .unwrap();
     }
 
     fn create_vue3_project(dir: &TempDir) {
@@ -236,9 +244,23 @@ mod tests {
         fs::write(root.join("tsconfig.json"), r#"{"compilerOptions":{}}"#).unwrap();
         fs::write(root.join("index.html"), "<html></html>").unwrap();
         fs::create_dir_all(root.join("src").join("views").join("dashboard")).unwrap();
-        fs::write(root.join("src").join("views").join("dashboard").join("index.vue"), "<template>Dashboard</template>").unwrap();
+        fs::write(
+            root.join("src")
+                .join("views")
+                .join("dashboard")
+                .join("index.vue"),
+            "<template>Dashboard</template>",
+        )
+        .unwrap();
         fs::create_dir_all(root.join("src").join("views").join("login")).unwrap();
-        fs::write(root.join("src").join("views").join("login").join("index.vue"), "<template>Login</template>").unwrap();
+        fs::write(
+            root.join("src")
+                .join("views")
+                .join("login")
+                .join("index.vue"),
+            "<template>Login</template>",
+        )
+        .unwrap();
     }
 
     fn read_zip_entries(zip_path: &Path) -> Vec<String> {

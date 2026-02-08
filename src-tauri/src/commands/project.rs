@@ -4,8 +4,8 @@
 // ============================================================================
 
 use crate::models::dtos::{ModuleInfo, ProjectInfo};
-use crate::services::scanner;
 use crate::services::scan_strategy;
+use crate::services::scanner;
 
 /// 打开项目：弹出原生文件夹选择对话框，验证项目结构
 ///
@@ -25,9 +25,9 @@ pub async fn open_project(app: tauri::AppHandle) -> Result<ProjectInfo, String> 
     };
 
     // 解析文件夹路径
-    let path = folder_path.as_path().ok_or_else(|| {
-        "项目验证失败：无法解析所选文件夹路径".to_string()
-    })?;
+    let path = folder_path
+        .as_path()
+        .ok_or_else(|| "项目验证失败：无法解析所选文件夹路径".to_string())?;
 
     // 调用 services 层验证项目结构并扫描核心文件
     let core_files = scanner::validate_project(path)?;

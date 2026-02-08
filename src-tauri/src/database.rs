@@ -81,19 +81,26 @@ impl Database {
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         // 确保数据目录存在
         std::fs::create_dir_all(app_data_dir).map_err(|e| {
-            format!("数据库初始化失败：无法创建数据目录 {}: {}", app_data_dir.display(), e)
+            format!(
+                "数据库初始化失败：无法创建数据目录 {}: {}",
+                app_data_dir.display(),
+                e
+            )
         })?;
 
         // 在数据目录下创建/打开数据库文件
         let db_path = app_data_dir.join("prism_console.db");
         let conn = Connection::open(&db_path).map_err(|e| {
-            format!("数据库初始化失败：无法打开数据库文件 {}: {}", db_path.display(), e)
+            format!(
+                "数据库初始化失败：无法打开数据库文件 {}: {}",
+                db_path.display(),
+                e
+            )
         })?;
 
         // 启用外键约束（SQLite 默认关闭外键支持）
-        conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(|e| {
-            format!("数据库初始化失败：无法启用外键约束: {}", e)
-        })?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| format!("数据库初始化失败：无法启用外键约束: {}", e))?;
 
         // 创建所有必要的表
         Self::create_tables(&conn)?;
@@ -161,10 +168,9 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            "
-        ).map_err(|e| {
-            format!("数据库初始化失败：创建表结构时出错: {}", e)
-        })?;
+            ",
+        )
+        .map_err(|e| format!("数据库初始化失败：创建表结构时出错: {}", e))?;
 
         Ok(())
     }
@@ -187,7 +193,11 @@ impl Database {
     /// # 返回
     /// - `Ok(Category)`: 创建成功，返回完整的分类记录
     /// - `Err(String)`: 创建失败（如名称重复），返回中文错误描述
-    pub fn create_category(&self, name: &str, description: Option<&str>) -> Result<Category, String> {
+    pub fn create_category(
+        &self,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<Category, String> {
         self.conn
             .execute(
                 "INSERT INTO categories (name, description) VALUES (?1, ?2)",
@@ -258,7 +268,12 @@ impl Database {
     /// # 返回
     /// - `Ok(())`: 更新成功
     /// - `Err(String)`: 更新失败（如名称重复或 ID 不存在），返回中文错误描述
-    pub fn update_category(&self, id: i64, name: &str, description: Option<&str>) -> Result<(), String> {
+    pub fn update_category(
+        &self,
+        id: i64,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<(), String> {
         let rows_affected = self
             .conn
             .execute(
@@ -338,7 +353,13 @@ impl Database {
     /// # 返回
     /// - `Ok(Project)`: 创建成功，返回完整的项目记录
     /// - `Err(String)`: 创建失败（如路径不存在），返回中文错误描述
-    pub fn create_project(&self, name: &str, category_id: i64, repo_path: &str, tech_stack: &str) -> Result<Project, String> {
+    pub fn create_project(
+        &self,
+        name: &str,
+        category_id: i64,
+        repo_path: &str,
+        tech_stack: &str,
+    ) -> Result<Project, String> {
         // 检查仓库路径是否存在于文件系统
         if !std::path::Path::new(repo_path).exists() {
             return Err(format!("项目路径不存在：{}", repo_path));
@@ -450,7 +471,13 @@ impl Database {
     /// # 返回
     /// - `Ok(())`: 更新成功
     /// - `Err(String)`: 更新失败（如 ID 不存在），返回中文错误描述
-    pub fn update_project(&self, id: i64, name: &str, category_id: i64, tech_stack: &str) -> Result<(), String> {
+    pub fn update_project(
+        &self,
+        id: i64,
+        name: &str,
+        category_id: i64,
+        tech_stack: &str,
+    ) -> Result<(), String> {
         let rows_affected = self
             .conn
             .execute(
@@ -508,10 +535,7 @@ impl Database {
     pub fn create_client(&self, name: &str, project_ids: &[i64]) -> Result<Client, String> {
         // 插入客户记录
         self.conn
-            .execute(
-                "INSERT INTO clients (name) VALUES (?1)",
-                params![name],
-            )
+            .execute("INSERT INTO clients (name) VALUES (?1)", params![name])
             .map_err(|e| format!("创建客户失败：{}", e))?;
 
         let client_id = self.conn.last_insert_rowid();
@@ -935,10 +959,7 @@ mod tests {
 
         // 先创建分类
         db.conn()
-            .execute(
-                "INSERT INTO categories (name) VALUES (?1)",
-                params!["后端"],
-            )
+            .execute("INSERT INTO categories (name) VALUES (?1)", params!["后端"])
             .unwrap();
         let category_id: i64 = db
             .conn()
@@ -1156,7 +1177,8 @@ mod tests {
         let db = Database::init(dir.path()).unwrap();
 
         let cat = db.create_category("旧名称", None).unwrap();
-        db.update_category(cat.id, "新名称", Some("新描述")).unwrap();
+        db.update_category(cat.id, "新名称", Some("新描述"))
+            .unwrap();
 
         let cats = db.list_categories().unwrap();
         assert_eq!(cats.len(), 1);
@@ -1293,7 +1315,9 @@ mod tests {
         // 创建项目（使用临时目录作为仓库路径）
         let repo_dir = TempDir::new().unwrap();
         let repo_path = repo_dir.path().to_str().unwrap().to_string();
-        let project = db.create_project("测试项目", cat.id, &repo_path, "fastapi").unwrap();
+        let project = db
+            .create_project("测试项目", cat.id, &repo_path, "fastapi")
+            .unwrap();
 
         // 创建客户并关联到项目
         let client = db.create_client("测试客户", &[project.id]).unwrap();
@@ -1311,7 +1335,9 @@ mod tests {
         let modules_json = r#"["module_a","module_b"]"#;
         let output_path = "/tmp/output/test.zip";
 
-        let record = db.create_build_record(project_id, client_id, modules_json, output_path).unwrap();
+        let record = db
+            .create_build_record(project_id, client_id, modules_json, output_path)
+            .unwrap();
 
         assert!(record.id > 0);
         assert_eq!(record.project_id, project_id);
@@ -1327,7 +1353,9 @@ mod tests {
         let (db, _dir, project_id, client_id) = setup_project_and_client();
 
         let modules_json = r#"["auth","users","orders"]"#;
-        let record = db.create_build_record(project_id, client_id, modules_json, "/tmp/out.zip").unwrap();
+        let record = db
+            .create_build_record(project_id, client_id, modules_json, "/tmp/out.zip")
+            .unwrap();
 
         // 验证 JSON 字符串原样存储和读取
         assert_eq!(record.selected_modules, modules_json);
@@ -1339,8 +1367,12 @@ mod tests {
         let (db, _dir, project_id, client_id) = setup_project_and_client();
 
         // 创建多条构建记录
-        let r1 = db.create_build_record(project_id, client_id, r#"["mod_a"]"#, "/tmp/out1.zip").unwrap();
-        let r2 = db.create_build_record(project_id, client_id, r#"["mod_b"]"#, "/tmp/out2.zip").unwrap();
+        let r1 = db
+            .create_build_record(project_id, client_id, r#"["mod_a"]"#, "/tmp/out1.zip")
+            .unwrap();
+        let r2 = db
+            .create_build_record(project_id, client_id, r#"["mod_b"]"#, "/tmp/out2.zip")
+            .unwrap();
 
         let records = db.list_build_records_by_project(project_id).unwrap();
         assert_eq!(records.len(), 2);
@@ -1371,18 +1403,32 @@ mod tests {
         // 创建两个项目
         let repo_dir_a = TempDir::new().unwrap();
         let repo_dir_b = TempDir::new().unwrap();
-        let project_a = db.create_project("项目A", cat.id, repo_dir_a.path().to_str().unwrap(), "fastapi").unwrap();
-        let project_b = db.create_project("项目B", cat.id, repo_dir_b.path().to_str().unwrap(), "vue3").unwrap();
+        let project_a = db
+            .create_project(
+                "项目A",
+                cat.id,
+                repo_dir_a.path().to_str().unwrap(),
+                "fastapi",
+            )
+            .unwrap();
+        let project_b = db
+            .create_project("项目B", cat.id, repo_dir_b.path().to_str().unwrap(), "vue3")
+            .unwrap();
 
         // 创建客户
-        let client = db.create_client("客户X", &[project_a.id, project_b.id]).unwrap();
+        let client = db
+            .create_client("客户X", &[project_a.id, project_b.id])
+            .unwrap();
 
         // 为项目 A 创建 2 条记录
-        db.create_build_record(project_a.id, client.id, r#"["a1"]"#, "/tmp/a1.zip").unwrap();
-        db.create_build_record(project_a.id, client.id, r#"["a2"]"#, "/tmp/a2.zip").unwrap();
+        db.create_build_record(project_a.id, client.id, r#"["a1"]"#, "/tmp/a1.zip")
+            .unwrap();
+        db.create_build_record(project_a.id, client.id, r#"["a2"]"#, "/tmp/a2.zip")
+            .unwrap();
 
         // 为项目 B 创建 1 条记录
-        db.create_build_record(project_b.id, client.id, r#"["b1"]"#, "/tmp/b1.zip").unwrap();
+        db.create_build_record(project_b.id, client.id, r#"["b1"]"#, "/tmp/b1.zip")
+            .unwrap();
 
         // 查询项目 A 的记录
         let records_a = db.list_build_records_by_project(project_a.id).unwrap();
@@ -1417,11 +1463,15 @@ mod tests {
         let db = Database::init(dir.path()).unwrap();
 
         // 保存设置
-        db.save_setting("default_output_dir", "/home/user/output").unwrap();
+        db.save_setting("default_output_dir", "/home/user/output")
+            .unwrap();
 
         // 读取设置
         let settings = db.get_settings("/path/to/db").unwrap();
-        assert_eq!(settings.default_output_dir, Some("/home/user/output".to_string()));
+        assert_eq!(
+            settings.default_output_dir,
+            Some("/home/user/output".to_string())
+        );
         assert_eq!(settings.db_path, "/path/to/db");
     }
 
@@ -1456,7 +1506,8 @@ mod tests {
         assert_eq!(settings.default_output_dir, Some("/output".to_string()));
 
         // 验证其他键也确实存储了
-        let theme: String = db.conn()
+        let theme: String = db
+            .conn()
             .query_row(
                 "SELECT value FROM settings WHERE key = ?1",
                 params!["theme"],
@@ -1483,7 +1534,9 @@ mod tests {
         let repo_dir = TempDir::new().unwrap();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let project = db.create_project("测试项目", cat.id, repo_path, "fastapi").unwrap();
+        let project = db
+            .create_project("测试项目", cat.id, repo_path, "fastapi")
+            .unwrap();
         assert!(project.id > 0);
         assert_eq!(project.name, "测试项目");
         assert_eq!(project.category_id, cat.id);
@@ -1502,7 +1555,9 @@ mod tests {
         let cat = db.create_category("前端", None).unwrap();
 
         let fake_path = "/this/path/does/not/exist/at/all";
-        let err = db.create_project("项目X", cat.id, fake_path, "vue3").unwrap_err();
+        let err = db
+            .create_project("项目X", cat.id, fake_path, "vue3")
+            .unwrap_err();
         assert_eq!(err, format!("项目路径不存在：{}", fake_path));
     }
 
@@ -1521,8 +1576,10 @@ mod tests {
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
 
-        db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi").unwrap();
-        db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3").unwrap();
+        db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+            .unwrap();
+        db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+            .unwrap();
 
         let projects = db.list_projects().unwrap();
         assert_eq!(projects.len(), 2);
@@ -1542,7 +1599,9 @@ mod tests {
         let repo = TempDir::new().unwrap();
         let repo_path = repo.path().to_str().unwrap();
 
-        let created = db.create_project("我的项目", cat.id, repo_path, "fastapi").unwrap();
+        let created = db
+            .create_project("我的项目", cat.id, repo_path, "fastapi")
+            .unwrap();
         let fetched = db.get_project(created.id).unwrap();
 
         assert_eq!(fetched.id, created.id);
@@ -1572,10 +1631,13 @@ mod tests {
         let cat2 = db.create_category("后端", None).unwrap();
         let repo = TempDir::new().unwrap();
 
-        let project = db.create_project("旧名称", cat1.id, repo.path().to_str().unwrap(), "vue3").unwrap();
+        let project = db
+            .create_project("旧名称", cat1.id, repo.path().to_str().unwrap(), "vue3")
+            .unwrap();
 
         // 更新项目
-        db.update_project(project.id, "新名称", cat2.id, "fastapi").unwrap();
+        db.update_project(project.id, "新名称", cat2.id, "fastapi")
+            .unwrap();
 
         // 验证更新结果
         let updated = db.get_project(project.id).unwrap();
@@ -1603,7 +1665,9 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
 
-        let project = db.create_project("待删除", cat.id, repo.path().to_str().unwrap(), "fastapi").unwrap();
+        let project = db
+            .create_project("待删除", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .unwrap();
         db.delete_project(project.id).unwrap();
 
         // 验证项目已被删除
@@ -1630,7 +1694,9 @@ mod tests {
         // 创建分类 -> 项目 -> 客户 -> 关联 -> 构建记录
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
-        let project = db.create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi").unwrap();
+        let project = db
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .unwrap();
 
         // 手动插入客户和关联数据
         db.conn()
@@ -1697,7 +1763,9 @@ mod tests {
         // 创建分类和项目（用于关联）
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
-        let project = db.create_project("项目A", cat.id, repo.path().to_str().unwrap(), "fastapi").unwrap();
+        let project = db
+            .create_project("项目A", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .unwrap();
 
         // 创建客户并关联到项目
         let client = db.create_client("客户X", &[project.id]).unwrap();
@@ -1747,8 +1815,12 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
-        let p1 = db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi").unwrap();
-        let p2 = db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3").unwrap();
+        let p1 = db
+            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+            .unwrap();
+        let p2 = db
+            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+            .unwrap();
 
         // 创建客户并关联到两个项目
         let client = db.create_client("多项目客户", &[p1.id, p2.id]).unwrap();
@@ -1774,8 +1846,12 @@ mod tests {
         let cat = db.create_category("分类", None).unwrap();
         let repo1 = TempDir::new().unwrap();
         let repo2 = TempDir::new().unwrap();
-        let p1 = db.create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi").unwrap();
-        let p2 = db.create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3").unwrap();
+        let p1 = db
+            .create_project("项目A", cat.id, repo1.path().to_str().unwrap(), "fastapi")
+            .unwrap();
+        let p2 = db
+            .create_project("项目B", cat.id, repo2.path().to_str().unwrap(), "vue3")
+            .unwrap();
 
         // 客户1 关联到项目A
         db.create_client("客户1", &[p1.id]).unwrap();
@@ -1807,7 +1883,9 @@ mod tests {
 
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
-        let project = db.create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi").unwrap();
+        let project = db
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .unwrap();
 
         // 未创建任何客户，查询应返回空列表
         let clients = db.list_clients_by_project(project.id).unwrap();
@@ -1857,7 +1935,11 @@ mod tests {
         // 验证客户已被删除
         let count: i64 = db
             .conn()
-            .query_row("SELECT COUNT(*) FROM clients WHERE id = ?1", params![client.id], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM clients WHERE id = ?1",
+                params![client.id],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
     }
@@ -1880,7 +1962,9 @@ mod tests {
 
         let cat = db.create_category("分类", None).unwrap();
         let repo = TempDir::new().unwrap();
-        let project = db.create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi").unwrap();
+        let project = db
+            .create_project("项目", cat.id, repo.path().to_str().unwrap(), "fastapi")
+            .unwrap();
 
         // 创建客户并关联到项目
         let client = db.create_client("客户", &[project.id]).unwrap();
@@ -1917,10 +2001,7 @@ mod tests {
 
     /// 生成可选的分类描述策略
     fn optional_description_strategy() -> impl Strategy<Value = Option<String>> {
-        prop_oneof![
-            Just(None),
-            "[a-zA-Z0-9_ ]{1,50}".prop_map(Some),
-        ]
+        prop_oneof![Just(None), "[a-zA-Z0-9_ ]{1,50}".prop_map(Some),]
     }
 
     proptest! {

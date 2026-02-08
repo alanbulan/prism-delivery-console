@@ -19,11 +19,15 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 获取应用数据目录并初始化数据库
-            let app_data_dir = app.path().app_data_dir()
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
                 .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
             let db = database::Database::init(&app_data_dir)
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))?;

@@ -39,31 +39,42 @@ pub fn validate_build_params(client_name: &str, selected_modules: &[String]) -> 
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     // 创建目标目录
     std::fs::create_dir_all(dst).map_err(|e| {
-        format!("构建失败：复制文件时出错 - 无法创建目录 {}: {}", dst.display(), e)
+        format!(
+            "构建失败：复制文件时出错 - 无法创建目录 {}: {}",
+            dst.display(),
+            e
+        )
     })?;
 
     // 使用 walkdir 遍历源目录
     for entry in walkdir::WalkDir::new(src) {
-        let entry = entry.map_err(|e| {
-            format!("构建失败：复制文件时出错 - 遍历目录失败: {}", e)
-        })?;
+        let entry = entry.map_err(|e| format!("构建失败：复制文件时出错 - 遍历目录失败: {}", e))?;
 
         // 计算相对路径并拼接到目标路径
-        let relative_path = entry.path().strip_prefix(src).map_err(|e| {
-            format!("构建失败：复制文件时出错 - 路径处理失败: {}", e)
-        })?;
+        let relative_path = entry
+            .path()
+            .strip_prefix(src)
+            .map_err(|e| format!("构建失败：复制文件时出错 - 路径处理失败: {}", e))?;
         let target_path = dst.join(relative_path);
 
         if entry.file_type().is_dir() {
             // 创建对应的目录结构
             std::fs::create_dir_all(&target_path).map_err(|e| {
-                format!("构建失败：复制文件时出错 - 无法创建目录 {}: {}", target_path.display(), e)
+                format!(
+                    "构建失败：复制文件时出错 - 无法创建目录 {}: {}",
+                    target_path.display(),
+                    e
+                )
             })?;
         } else {
             // 复制文件
             std::fs::copy(entry.path(), &target_path).map_err(|e| {
-                format!("构建失败：复制文件时出错 - 无法复制 {} 到 {}: {}",
-                    entry.path().display(), target_path.display(), e)
+                format!(
+                    "构建失败：复制文件时出错 - 无法复制 {} 到 {}: {}",
+                    entry.path().display(),
+                    target_path.display(),
+                    e
+                )
             })?;
         }
     }
@@ -82,9 +93,8 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 /// - `Err(String)`: 中文错误描述
 pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> Result<(), String> {
     // 创建 ZIP 文件
-    let file = std::fs::File::create(zip_path).map_err(|e| {
-        format!("构建失败：打包 ZIP 时出错 - 无法创建 ZIP 文件: {}", e)
-    })?;
+    let file = std::fs::File::create(zip_path)
+        .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 无法创建 ZIP 文件: {}", e))?;
     let mut zip_writer = zip::ZipWriter::new(file);
 
     // 设置 ZIP 压缩选项（使用 Deflated 压缩）
@@ -93,15 +103,14 @@ pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> Result<(), String
 
     // 使用 walkdir 遍历源目录中的所有文件
     for entry in walkdir::WalkDir::new(src_dir) {
-        let entry = entry.map_err(|e| {
-            format!("构建失败：打包 ZIP 时出错 - 遍历目录失败: {}", e)
-        })?;
+        let entry =
+            entry.map_err(|e| format!("构建失败：打包 ZIP 时出错 - 遍历目录失败: {}", e))?;
 
         let path = entry.path();
         // 计算相对于源目录的路径，作为 ZIP 内的文件名
-        let relative_path = path.strip_prefix(src_dir).map_err(|e| {
-            format!("构建失败：打包 ZIP 时出错 - 路径处理失败: {}", e)
-        })?;
+        let relative_path = path
+            .strip_prefix(src_dir)
+            .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 路径处理失败: {}", e))?;
 
         // 跳过根目录本身
         if relative_path.as_os_str().is_empty() {
@@ -115,29 +124,24 @@ pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> Result<(), String
             // 添加目录条目（以 / 结尾）
             zip_writer
                 .add_directory(format!("{}/", zip_entry_name), options)
-                .map_err(|e| {
-                    format!("构建失败：打包 ZIP 时出错 - 添加目录失败: {}", e)
-                })?;
+                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 添加目录失败: {}", e))?;
         } else {
             // 添加文件条目
             zip_writer
                 .start_file(&zip_entry_name, options)
-                .map_err(|e| {
-                    format!("构建失败：打包 ZIP 时出错 - 添加文件失败: {}", e)
-                })?;
-            let content = std::fs::read(path).map_err(|e| {
-                format!("构建失败：打包 ZIP 时出错 - 读取文件失败: {}", e)
-            })?;
-            zip_writer.write_all(&content).map_err(|e| {
-                format!("构建失败：打包 ZIP 时出错 - 写入文件失败: {}", e)
-            })?;
+                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 添加文件失败: {}", e))?;
+            let content = std::fs::read(path)
+                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 读取文件失败: {}", e))?;
+            zip_writer
+                .write_all(&content)
+                .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 写入文件失败: {}", e))?;
         }
     }
 
     // 完成 ZIP 写入
-    zip_writer.finish().map_err(|e| {
-        format!("构建失败：打包 ZIP 时出错 - 完成写入失败: {}", e)
-    })?;
+    zip_writer
+        .finish()
+        .map_err(|e| format!("构建失败：打包 ZIP 时出错 - 完成写入失败: {}", e))?;
 
     Ok(())
 }

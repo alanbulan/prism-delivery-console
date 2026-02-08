@@ -4,10 +4,10 @@
 // ⛔ 禁止：直接返回前端专用的错误格式
 // ============================================================================
 
-pub mod scanner;
+pub mod build_strategy;
 pub mod packer;
 pub mod scan_strategy;
-pub mod build_strategy;
+pub mod scanner;
 
 // ============================================================================
 // 常量定义

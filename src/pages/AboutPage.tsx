@@ -4,14 +4,27 @@
  * 职责：
  * - 展示应用名称、版本号、技术栈信息和团队信息
  * - 版本号通过 Tauri getVersion API 动态读取
+ * - 提供"检查更新"功能（Tauri v2 Updater Plugin）
  * - Liquid Glass 风格的精致卡片布局
  *
- * 需求: 11.1, 11.2, 11.3, 11.4
+ * 需求: 11.1, 11.2, 11.3, 11.4, 12.1
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Layers, Users, Code2, Heart } from "lucide-react";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import {
+  Layers,
+  Users,
+  Code2,
+  Heart,
+  RefreshCw,
+  Download,
+  CheckCircle2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 /** 技术栈条目 */
 const TECH_STACK = [
@@ -23,13 +36,109 @@ const TECH_STACK = [
   { name: "Tailwind CSS", version: "4", desc: "原子化样式" },
 ] as const;
 
+/** 更新状态枚举 */
+type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "upToDate" | "error";
+
 export function AboutPage() {
   /** 应用版本号，从 Tauri 配置中读取 */
   const [version, setVersion] = useState<string>("");
+  /** 更新状态 */
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  /** 下载进度百分比 */
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion("unknown"));
   }, []);
+
+  /** 检查更新 */
+  const handleCheckUpdate = useCallback(async () => {
+    try {
+      setUpdateStatus("checking");
+      const update = await check();
+
+      if (!update) {
+        setUpdateStatus("upToDate");
+        toast.success("当前已是最新版本");
+        // 3 秒后恢复空闲状态
+        setTimeout(() => setUpdateStatus("idle"), 3000);
+        return;
+      }
+
+      // 发现新版本
+      setUpdateStatus("available");
+      toast.info(`发现新版本 v${update.version}`);
+
+      // 开始下载并安装
+      setUpdateStatus("downloading");
+      let downloaded = 0;
+      let contentLength = 0;
+
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            contentLength = event.data.contentLength ?? 0;
+            break;
+          case "Progress":
+            downloaded += event.data.chunkLength;
+            if (contentLength > 0) {
+              setDownloadProgress(Math.round((downloaded / contentLength) * 100));
+            }
+            break;
+          case "Finished":
+            setDownloadProgress(100);
+            break;
+        }
+      });
+
+      toast.success("更新已安装，即将重启应用...");
+      // 短暂延迟后重启，让用户看到提示
+      setTimeout(() => relaunch(), 1500);
+    } catch (err) {
+      setUpdateStatus("error");
+      toast.error(`检查更新失败: ${String(err)}`);
+      setTimeout(() => setUpdateStatus("idle"), 3000);
+    }
+  }, []);
+
+  /** 根据更新状态渲染按钮内容 */
+  const renderUpdateButton = () => {
+    switch (updateStatus) {
+      case "checking":
+        return (
+          <Button variant="outline" size="sm" disabled className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            检查中...
+          </Button>
+        );
+      case "downloading":
+        return (
+          <Button variant="outline" size="sm" disabled className="gap-1.5">
+            <Download className="h-3.5 w-3.5 animate-bounce" />
+            下载中 {downloadProgress}%
+          </Button>
+        );
+      case "upToDate":
+        return (
+          <Button variant="outline" size="sm" disabled className="gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            已是最新
+          </Button>
+        );
+      default:
+        return (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCheckUpdate}
+            className="gap-1.5"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            检查更新
+          </Button>
+        );
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -44,9 +153,55 @@ export function AboutPage() {
 
           {/* 应用标识卡片 */}
           <section className="glass-panel flex flex-col items-center gap-4 p-8">
-            {/* 应用图标占位 - 使用 Prism 棱镜概念 */}
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 via-indigo-500/20 to-purple-500/20 shadow-inner">
-              <div className="h-8 w-8 rotate-45 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-500 opacity-80" />
+            {/* 应用图标 - Prism 棱镜概念：多层光学折射效果 */}
+            <div className="relative flex h-20 w-20 items-center justify-center">
+              {/* 外层光晕 */}
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-400/20 via-violet-400/15 to-indigo-400/20 blur-md" />
+              {/* 主体容器 */}
+              <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-50/90 to-white/80 shadow-lg ring-1 ring-white/60">
+                {/* 棱镜三角形 - 使用 CSS 绘制 */}
+                <svg viewBox="0 0 48 48" className="h-11 w-11" fill="none">
+                  {/* 棱镜主体 */}
+                  <defs>
+                    <linearGradient id="prism-face-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity="0.9" />
+                      <stop offset="100%" stopColor="#818cf8" stopOpacity="0.7" />
+                    </linearGradient>
+                    <linearGradient id="prism-face-2" x1="0%" y1="100%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#60a5fa" stopOpacity="0.6" />
+                    </linearGradient>
+                    <linearGradient id="prism-face-3" x1="100%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.7" />
+                      <stop offset="100%" stopColor="#a78bfa" stopOpacity="0.5" />
+                    </linearGradient>
+                    {/* 彩虹光谱渐变 */}
+                    <linearGradient id="spectrum" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
+                      <stop offset="20%" stopColor="#f97316" stopOpacity="0.7" />
+                      <stop offset="40%" stopColor="#eab308" stopOpacity="0.7" />
+                      <stop offset="60%" stopColor="#22c55e" stopOpacity="0.7" />
+                      <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.7" />
+                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.8" />
+                    </linearGradient>
+                  </defs>
+                  {/* 入射光线 */}
+                  <line x1="2" y1="22" x2="16" y2="22" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+                  {/* 棱镜三角形 - 三个面 */}
+                  <polygon points="24,8 38,36 10,36" fill="url(#prism-face-1)" />
+                  <polygon points="24,8 38,36 24,36" fill="url(#prism-face-2)" />
+                  <polygon points="24,8 10,36 24,28" fill="url(#prism-face-3)" />
+                  {/* 棱镜边框 */}
+                  <polygon points="24,8 38,36 10,36" fill="none" stroke="white" strokeWidth="0.8" opacity="0.5" />
+                  {/* 折射光谱 - 从棱镜右侧射出的彩虹 */}
+                  <line x1="34" y1="18" x2="46" y2="12" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                  <line x1="35" y1="20" x2="46" y2="16" stroke="#f97316" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                  <line x1="36" y1="22" x2="46" y2="20" stroke="#eab308" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                  <line x1="36" y1="24" x2="46" y2="24" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                  <line x1="36" y1="26" x2="46" y2="28" stroke="#3b82f6" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                  <line x1="35" y1="28" x2="46" y2="32" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
+                </svg>
+              </div>
             </div>
 
             <div className="flex flex-col items-center gap-1">
@@ -58,12 +213,15 @@ export function AboutPage() {
               </p>
             </div>
 
-            {/* 版本标签 */}
-            {version && (
-              <span className="rounded-full bg-accent px-4 py-1 text-xs font-medium text-accent-foreground">
-                v{version}
-              </span>
-            )}
+            {/* 版本标签 + 检查更新按钮 */}
+            <div className="flex items-center gap-3">
+              {version && (
+                <span className="rounded-full bg-accent px-4 py-1 text-xs font-medium text-accent-foreground">
+                  v{version}
+                </span>
+              )}
+              {renderUpdateButton()}
+            </div>
           </section>
 
           {/* 技术栈卡片 */}

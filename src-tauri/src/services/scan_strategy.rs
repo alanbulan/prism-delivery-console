@@ -44,9 +44,7 @@ impl ScanStrategy for FastApiScanner {
     fn scan(&self, project_path: &Path) -> Result<Vec<ModuleInfo>, String> {
         let modules_dir = project_path.join("modules");
         if !modules_dir.is_dir() {
-            return Err(
-                "模块扫描失败：fastapi 项目应包含 modules 目录".to_string(),
-            );
+            return Err("模块扫描失败：fastapi 项目应包含 modules 目录".to_string());
         }
         crate::services::scanner::scan_modules_dir(&modules_dir)
     }
@@ -66,9 +64,7 @@ impl ScanStrategy for Vue3Scanner {
     fn scan(&self, project_path: &Path) -> Result<Vec<ModuleInfo>, String> {
         let views_dir = project_path.join("src").join("views");
         if !views_dir.is_dir() {
-            return Err(
-                "模块扫描失败：vue3 项目应包含 src/views 目录".to_string(),
-            );
+            return Err("模块扫描失败：vue3 项目应包含 src/views 目录".to_string());
         }
 
         // 读取 src/views/ 目录条目

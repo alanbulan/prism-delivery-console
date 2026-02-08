@@ -6,8 +6,8 @@
 use std::path::Path;
 
 use crate::models::dtos::BuildResult;
-use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
 use crate::services::build_strategy;
+use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
 use crate::services::CORE_FILES;
 
 /// 构建交付包：复制核心文件和选中模块，打包为 ZIP
@@ -29,8 +29,7 @@ pub async fn build_package(
     let zip_path = project_dir.join(format!("{}.zip", dist_name));
 
     // 2. 创建临时目录
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|_| "构建失败：无法创建临时目录".to_string())?;
+    std::fs::create_dir_all(&temp_dir).map_err(|_| "构建失败：无法创建临时目录".to_string())?;
 
     // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
     let temp_dir_path = temp_dir.clone();
@@ -51,17 +50,15 @@ pub async fn build_package(
             copy_dir_recursive(&source, &dest)?;
         } else {
             let dest = temp_dir.join(core_item);
-            std::fs::copy(&source, &dest).map_err(|e| {
-                format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e)
-            })?;
+            std::fs::copy(&source, &dest)
+                .map_err(|e| format!("构建失败：复制文件时出错 - 无法复制 {}: {}", core_item, e))?;
         }
     }
 
     // 5. 创建 modules/ 子目录并复制选中的模块
     let modules_dest = temp_dir.join("modules");
-    std::fs::create_dir_all(&modules_dest).map_err(|e| {
-        format!("构建失败：复制文件时出错 - 无法创建 modules 目录: {}", e)
-    })?;
+    std::fs::create_dir_all(&modules_dest)
+        .map_err(|e| format!("构建失败：复制文件时出错 - 无法创建 modules 目录: {}", e))?;
 
     for module_name in &selected_modules {
         let module_src = project_dir.join("modules").join(module_name);

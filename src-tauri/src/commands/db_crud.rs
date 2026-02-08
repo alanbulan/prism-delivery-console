@@ -23,16 +23,18 @@ pub async fn db_create_category(
     name: String,
     description: Option<String>,
 ) -> Result<Category, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.create_category(&name, description.as_deref())
 }
 
 /// 查询所有分类
 #[tauri::command]
-pub async fn db_list_categories(
-    db: State<'_, Mutex<Database>>,
-) -> Result<Vec<Category>, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+pub async fn db_list_categories(db: State<'_, Mutex<Database>>) -> Result<Vec<Category>, String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.list_categories()
 }
 
@@ -44,17 +46,18 @@ pub async fn db_update_category(
     name: String,
     description: Option<String>,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.update_category(id, &name, description.as_deref())
 }
 
 /// 删除分类
 #[tauri::command]
-pub async fn db_delete_category(
-    db: State<'_, Mutex<Database>>,
-    id: i64,
-) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+pub async fn db_delete_category(db: State<'_, Mutex<Database>>, id: i64) -> Result<(), String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.delete_category(id)
 }
 
@@ -71,16 +74,18 @@ pub async fn db_create_project(
     repo_path: String,
     tech_stack: String,
 ) -> Result<Project, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.create_project(&name, category_id, &repo_path, &tech_stack)
 }
 
 /// 查询所有项目
 #[tauri::command]
-pub async fn db_list_projects(
-    db: State<'_, Mutex<Database>>,
-) -> Result<Vec<Project>, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+pub async fn db_list_projects(db: State<'_, Mutex<Database>>) -> Result<Vec<Project>, String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.list_projects()
 }
 
@@ -93,17 +98,18 @@ pub async fn db_update_project(
     category_id: i64,
     tech_stack: String,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.update_project(id, &name, category_id, &tech_stack)
 }
 
 /// 删除项目
 #[tauri::command]
-pub async fn db_delete_project(
-    db: State<'_, Mutex<Database>>,
-    id: i64,
-) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+pub async fn db_delete_project(db: State<'_, Mutex<Database>>, id: i64) -> Result<(), String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.delete_project(id)
 }
 
@@ -118,7 +124,9 @@ pub async fn db_create_client(
     name: String,
     project_ids: Vec<i64>,
 ) -> Result<Client, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.create_client(&name, &project_ids)
 }
 
@@ -128,7 +136,9 @@ pub async fn db_list_clients_by_project(
     db: State<'_, Mutex<Database>>,
     project_id: i64,
 ) -> Result<Vec<Client>, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.list_clients_by_project(project_id)
 }
 
@@ -139,17 +149,18 @@ pub async fn db_update_client(
     id: i64,
     name: String,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.update_client(id, &name)
 }
 
 /// 删除客户
 #[tauri::command]
-pub async fn db_delete_client(
-    db: State<'_, Mutex<Database>>,
-    id: i64,
-) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+pub async fn db_delete_client(db: State<'_, Mutex<Database>>, id: i64) -> Result<(), String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.delete_client(id)
 }
 
@@ -166,7 +177,9 @@ pub async fn db_create_build_record(
     modules_json: String,
     output_path: String,
 ) -> Result<BuildRecord, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.create_build_record(project_id, client_id, &modules_json, &output_path)
 }
 
@@ -176,7 +189,9 @@ pub async fn db_list_build_records(
     db: State<'_, Mutex<Database>>,
     project_id: i64,
 ) -> Result<Vec<BuildRecord>, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.list_build_records_by_project(project_id)
 }
 
@@ -189,12 +204,10 @@ pub async fn db_list_build_records(
 pub async fn get_app_settings(
     db: State<'_, Mutex<Database>>,
 ) -> Result<crate::database::AppSettings, String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
-    let db_path = db
-        .conn()
-        .path()
-        .map(|p| p.to_string())
-        .unwrap_or_default();
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db_path = db.conn().path().map(|p| p.to_string()).unwrap_or_default();
     db.get_settings(&db_path)
 }
 
@@ -205,6 +218,8 @@ pub async fn save_app_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.save_setting(&key, &value)
 }

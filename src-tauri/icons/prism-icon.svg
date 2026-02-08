@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <!-- 背景渐变 -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+
+    <!-- 棱镜面 A（左面）：深蓝紫 -->
+    <linearGradient id="faceA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4338ca"/>
+    </linearGradient>
+
+    <!-- 棱镜面 B（右面）：亮靛蓝 -->
+    <linearGradient id="faceB" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+
+    <!-- 棱镜面 C（底面）：深紫 -->
+    <linearGradient id="faceC" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+
+    <!-- 入射光渐变 -->
+    <linearGradient id="inLight" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f8fafc" stop-opacity="0"/>
+      <stop offset="60%" stop-color="#f8fafc" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#f8fafc" stop-opacity="0.9"/>
+    </linearGradient>
+
+    <!-- 棱镜顶部高光 -->
+    <linearGradient id="highlight" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- 外层光晕 -->
+    <radialGradient id="glow" cx="50%" cy="45%" r="45%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 圆角矩形裁剪 -->
+    <clipPath id="roundedClip">
+      <rect x="0" y="0" width="512" height="512" rx="108" ry="108"/>
+    </clipPath>
+  </defs>
+
+  <!-- 圆角背景 -->
+  <g clip-path="url(#roundedClip)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+
+    <!-- 背景光晕 -->
+    <circle cx="256" cy="230" r="220" fill="url(#glow)"/>
+
+    <!-- 入射白光 -->
+    <line x1="40" y1="235" x2="195" y2="235"
+          stroke="url(#inLight)" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- 入射光的微弱光晕 -->
+    <line x1="80" y1="235" x2="190" y2="235"
+          stroke="#f8fafc" stroke-width="14" stroke-linecap="round" opacity="0.06"/>
+
+    <!-- 棱镜主体 -->
+    <!-- 左面 -->
+    <polygon points="256,120 170,360 256,360" fill="url(#faceA)"/>
+    <!-- 右面 -->
+    <polygon points="256,120 342,360 256,360" fill="url(#faceB)"/>
+    <!-- 底面微妙区分 -->
+    <polygon points="170,360 342,360 256,360" fill="url(#faceC)"/>
+
+    <!-- 棱镜边缘高光 -->
+    <line x1="256" y1="120" x2="170" y2="360"
+          stroke="#a5b4fc" stroke-width="1" opacity="0.5"/>
+    <line x1="256" y1="120" x2="342" y2="360"
+          stroke="#c7d2fe" stroke-width="1" opacity="0.4"/>
+    <line x1="170" y1="360" x2="342" y2="360"
+          stroke="#818cf8" stroke-width="1" opacity="0.3"/>
+
+    <!-- 棱镜顶部高光三角 -->
+    <polygon points="256,120 220,220 292,220" fill="url(#highlight)" opacity="0.3"/>
+
+    <!-- 折射光谱 - 7 条彩虹光线从棱镜右侧射出 -->
+    <!-- 红 -->
+    <line x1="310" y1="200" x2="472" y2="140"
+          stroke="#ef4444" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 橙 -->
+    <line x1="315" y1="215" x2="472" y2="175"
+          stroke="#f97316" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 黄 -->
+    <line x1="320" y1="230" x2="472" y2="210"
+          stroke="#eab308" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 绿 -->
+    <line x1="322" y1="245" x2="472" y2="248"
+          stroke="#22c55e" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 青 -->
+    <line x1="322" y1="260" x2="472" y2="286"
+          stroke="#06b6d4" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 蓝 -->
+    <line x1="320" y1="275" x2="472" y2="324"
+          stroke="#3b82f6" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <!-- 紫 -->
+    <line x1="315" y1="290" x2="472" y2="362"
+          stroke="#8b5cf6" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+
+    <!-- 光谱光晕效果 -->
+    <line x1="310" y1="200" x2="472" y2="140"
+          stroke="#ef4444" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="315" y1="215" x2="472" y2="175"
+          stroke="#f97316" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="320" y1="230" x2="472" y2="210"
+          stroke="#eab308" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="322" y1="245" x2="472" y2="248"
+          stroke="#22c55e" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="322" y1="260" x2="472" y2="286"
+          stroke="#06b6d4" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="320" y1="275" x2="472" y2="324"
+          stroke="#3b82f6" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+    <line x1="315" y1="290" x2="472" y2="362"
+          stroke="#8b5cf6" stroke-width="12" stroke-linecap="round" opacity="0.08"/>
+  </g>
+</svg>
