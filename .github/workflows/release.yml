@@ -10,6 +10,7 @@
 #
 # 使用前需配置 GitHub Secrets：
 #   - TAURI_SIGNING_PRIVATE_KEY：~/.tauri/prism.key 的内容
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD：私钥密码（生成 key 时设置的密码）
 # ============================================================================
 
 name: Release
@@ -63,6 +64,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Prism Delivery Console ${{ github.ref_name }}'
