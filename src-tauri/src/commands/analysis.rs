@@ -94,19 +94,19 @@ pub fn scan_project_file_index(
     project_id: i64,
     project_path: String,
 ) -> Result<Vec<FileIndexEntry>, String> {
-    // 调用 services 层扫描文件
+    // 调用 services 层扫描文件（含 file_size + mtime 元数据）
     let entries =
         analyzer::scan_project_files(std::path::Path::new(&project_path))?;
 
     let db = db.lock().map_err(|e| format!("数据库锁获取失败：{}", e))?;
     let conn = db.conn();
 
-    // 从数据库加载已有的文件索引（用于增量对比），包含哈希和摘要
-    let mut existing: std::collections::HashMap<String, (String, Option<String>)> =
+    // 从数据库加载已有的文件索引（含 file_size、mtime 用于增量快速判断）
+    let mut existing: std::collections::HashMap<String, (String, Option<String>, u64, u64)> =
         std::collections::HashMap::new();
     {
         let mut stmt = conn
-            .prepare("SELECT file_path, file_hash, summary FROM file_index WHERE project_id = ?1")
+            .prepare("SELECT file_path, file_hash, summary, file_size, mtime FROM file_index WHERE project_id = ?1")
             .map_err(|e| format!("查询文件索引失败：{}", e))?;
         let rows = stmt
             .query_map(rusqlite::params![project_id], |row| {
@@ -114,47 +114,56 @@ pub fn scan_project_file_index(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, u64>(3).unwrap_or(0),
+                    row.get::<_, u64>(4).unwrap_or(0),
                 ))
             })
             .map_err(|e| format!("查询文件索引失败：{}", e))?;
         for row in rows {
-            let (path, hash, summary) =
+            let (path, hash, summary, size, mtime) =
                 row.map_err(|e| format!("读取文件索引失败：{}", e))?;
-            existing.insert(path, (hash, summary));
+            existing.insert(path, (hash, summary, size, mtime));
         }
     }
 
-    // 对比并构建结果，同时更新数据库
+    // 增量对比：先用 file_size + mtime 快速判断，跳过未变化文件的哈希比较
     let mut result = Vec::with_capacity(entries.len());
     for entry in &entries {
-        let (changed, old_summary) = match existing.get(&entry.relative_path) {
-            Some((old_hash, summary)) => {
-                let hash_changed = old_hash != &entry.file_hash;
-                // 哈希变更时清除旧摘要，否则保留
-                let kept_summary = if hash_changed { None } else { summary.clone() };
-                (hash_changed, kept_summary)
+        let (changed, old_summary, effective_hash) = match existing.get(&entry.relative_path) {
+            Some((old_hash, summary, old_size, old_mtime)) => {
+                // 快速路径：文件大小和修改时间都未变，直接复用缓存哈希
+                if *old_size == entry.file_size && *old_mtime == entry.mtime {
+                    (false, summary.clone(), old_hash.clone())
+                } else {
+                    // 元数据变化，用新哈希对比
+                    let hash_changed = old_hash != &entry.file_hash;
+                    let kept_summary = if hash_changed { None } else { summary.clone() };
+                    (hash_changed, kept_summary, entry.file_hash.clone())
+                }
             }
-            None => (true, None), // 新文件视为变更
+            None => (true, None, entry.file_hash.clone()), // 新文件视为变更
         };
 
-        // 使用 UPSERT 更新文件索引，哈希变更时清除摘要
+        // 使用 UPSERT 更新文件索引（含 file_size、mtime）
         conn.execute(
-            "INSERT INTO file_index (project_id, file_path, file_hash, summary, last_analyzed_at)
-             VALUES (?1, ?2, ?3, ?4, datetime('now'))
+            "INSERT INTO file_index (project_id, file_path, file_hash, summary, file_size, mtime, last_analyzed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
              ON CONFLICT(project_id, file_path)
-             DO UPDATE SET file_hash = ?3, summary = ?4, last_analyzed_at = datetime('now')",
+             DO UPDATE SET file_hash = ?3, summary = ?4, file_size = ?5, mtime = ?6, last_analyzed_at = datetime('now')",
             rusqlite::params![
                 project_id,
                 entry.relative_path,
-                entry.file_hash,
-                if changed { None::<String> } else { old_summary.clone() }
+                effective_hash,
+                if changed { None::<String> } else { old_summary.clone() },
+                entry.file_size as i64,
+                entry.mtime as i64,
             ],
         )
         .map_err(|e| format!("更新文件索引失败：{}", e))?;
 
         result.push(FileIndexEntry {
             relative_path: entry.relative_path.clone(),
-            file_hash: entry.file_hash.clone(),
+            file_hash: effective_hash,
             changed,
             summary: old_summary,
         });
@@ -175,6 +184,7 @@ pub fn scan_project_file_index(
 
     Ok(result)
 }
+
 
 /// 为单个文件生成 LLM 摘要并存入数据库
 ///

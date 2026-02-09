@@ -18,6 +18,10 @@ pub struct FileEntry {
     pub relative_path: String,
     /// 文件内容的 SHA256 哈希值（十六进制）
     pub file_hash: String,
+    /// 文件大小（字节）
+    pub file_size: u64,
+    /// 文件最后修改时间（Unix 时间戳秒数）
+    pub mtime: u64,
 }
 
 /// 扫描时需要忽略的目录名
@@ -51,8 +55,8 @@ pub fn scan_project_files(project_path: &Path) -> Result<Vec<FileEntry>, String>
         return Err(format!("项目路径不存在：{}", project_path.display()));
     }
 
-    // 第一步：收集所有文件路径（单线程遍历目录树）
-    let mut file_paths: Vec<(String, std::path::PathBuf)> = Vec::new();
+    // 第一步：收集所有文件路径及元数据（单线程遍历目录树）
+    let mut file_paths: Vec<(String, std::path::PathBuf, u64, u64)> = Vec::new();
 
     for entry in WalkDir::new(project_path)
         .into_iter()
@@ -82,17 +86,30 @@ pub fn scan_project_files(project_path: &Path) -> Result<Vec<FileEntry>, String>
             .to_string_lossy()
             .replace('\\', "/"); // 统一使用正斜杠
 
-        file_paths.push((relative, abs_path));
+        // 读取文件元数据（大小 + 修改时间），用于增量哈希缓存
+        let metadata = std::fs::metadata(&abs_path)
+            .map_err(|e| format!("读取文件元数据失败 {}: {}", abs_path.display(), e))?;
+        let file_size = metadata.len();
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        file_paths.push((relative, abs_path, file_size, mtime));
     }
 
     // 第二步：使用 rayon 并行计算所有文件的 SHA256 哈希
     let entries: Result<Vec<FileEntry>, String> = file_paths
         .par_iter()
-        .map(|(relative, abs_path)| {
+        .map(|(relative, abs_path, file_size, mtime)| {
             let hash = compute_file_hash(abs_path)?;
             Ok(FileEntry {
                 relative_path: relative.clone(),
                 file_hash: hash,
+                file_size: *file_size,
+                mtime: *mtime,
             })
         })
         .collect();
