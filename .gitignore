@@ -26,6 +26,9 @@ dist-ssr
 # Rust build output
 target/
 
+# 本地 Cargo 构建配置（含机器特定的 MSVC 路径，不应提交到仓库）
+src-tauri/.cargo/
+
 # Sanshu memory (local AI context)
 .sanshu-memory/
 
