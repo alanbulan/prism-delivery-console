@@ -20,6 +20,18 @@ export interface ChangelogEntry {
 /** 版本更新历史（最新在前，新版本在此数组头部添加即可） */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.0",
+    date: "2026-02-09",
+    changes: [
+      "构建系统重构：排除式骨架拷贝 + BFS 传递依赖分析",
+      "新增敏感文件自动排除（.env 等）",
+      "算法优化：时间戳后缀、增量哈希缓存、Rayon 并行哈希、ZIP 流式写入",
+      "新增签名索引 + AI 项目报告生成命令注册",
+      "分析页按钮样式统一为 outline",
+      "修复 index_project_signatures / generate_project_report 未注册的运行时 Bug",
+    ],
+  },
+  {
     version: "0.3.0",
     date: "2026-02-08",
     changes: [
