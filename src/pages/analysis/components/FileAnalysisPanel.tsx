@@ -53,7 +53,7 @@ export function FileAnalysisPanel({
           {scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           重新扫描
         </Button>
-        <Button onClick={onAnalyzeAll} disabled={batchAnalyzing || changedCount === 0} size="sm" className="gap-2">
+        <Button onClick={onAnalyzeAll} disabled={batchAnalyzing || changedCount === 0} variant="outline" size="sm" className="gap-2">
           {batchAnalyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           {batchAnalyzing ? "生成中..." : `全部生成 (${changedCount})`}
         </Button>

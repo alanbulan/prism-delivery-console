@@ -77,7 +77,7 @@ export function OverviewPanel({
         <div className="flex flex-col items-center gap-3 text-muted-foreground">
           <BarChart3 className="h-10 w-10 opacity-30" />
           <p className="text-sm">点击下方按钮加载项目概览</p>
-          <Button onClick={onLoad} disabled={loading} className="gap-2">
+          <Button variant="outline" onClick={onLoad} disabled={loading} className="gap-2">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BarChart3 className="h-4 w-4" />}
             {loading ? "加载中..." : "加载概览"}
           </Button>
@@ -243,6 +243,7 @@ export function OverviewPanel({
             </button>
           </div>
           <Button
+            variant="outline"
             size="sm"
             onClick={() => onGenerateReport(reportMode)}
             disabled={generatingReport || !signaturesIndexed}
