@@ -82,6 +82,9 @@ pub fn run() {
             commands::analysis::embed_all_files,
             commands::analysis::search_similar_files,
             commands::analysis::get_project_overview,
+            // 签名索引 + AI 报告 commands
+            commands::analysis::index_project_signatures,
+            commands::analysis::generate_project_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
