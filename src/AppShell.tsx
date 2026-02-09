@@ -25,6 +25,7 @@ import { Navigator } from "@/components/Navigator";
 import { ProjectPage } from "@/pages/projects";
 import { BuildPage } from "@/pages/build";
 import { AnalysisPage } from "@/pages/analysis";
+import TemplatesPage from "@/pages/templates";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AboutPage } from "@/pages/AboutPage";
 import type { PageId } from "@/types";
@@ -38,6 +39,8 @@ function PageContent({ pageId }: { pageId: PageId }) {
       return <BuildPage />;
     case "analysis":
       return <AnalysisPage />;
+    case "templates":
+      return <TemplatesPage />;
     case "settings":
       return <SettingsPage />;
     case "about":

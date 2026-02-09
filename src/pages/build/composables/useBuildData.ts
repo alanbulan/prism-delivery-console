@@ -39,6 +39,8 @@ export function useBuildData() {
   // ---- 本地状态 ----
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
+  // 项目骨架文件列表（排除模块目录后的核心文件树）
+  const [skeletonFiles, setSkeletonFiles] = useState<string[]>([]);
 
   // ---- 构建日志状态 ----
   const [buildLogs, setBuildLogs] = useState<string[]>([]);
@@ -190,6 +192,20 @@ export function useBuildData() {
     [setModules]
   );
 
+  /** 扫描项目骨架文件树（排除模块目录后的核心文件） */
+  const scanSkeleton = useCallback(async (project: Project) => {
+    try {
+      const files = await invoke<string[]>("scan_project_skeleton", {
+        projectPath: project.repo_path,
+        techStack: project.tech_stack_type,
+        modulesDir: project.modules_dir,
+      });
+      setSkeletonFiles(files);
+    } catch {
+      setSkeletonFiles([]);
+    }
+  }, []);
+
   /** 页面挂载时加载项目列表 */
   useEffect(() => {
     loadProjects();
@@ -209,10 +225,11 @@ export function useBuildData() {
     if (!project) return;
 
     scanModules(project);
+    scanSkeleton(project);
     loadClients(selectedProjectId);
     loadBuildRecords(selectedProjectId);
     setSelectedClientId(null);
-  }, [selectedProjectId, projects, scanModules, loadClients, loadBuildRecords, setClients, setBuildRecords, setModules]);
+  }, [selectedProjectId, projects, scanModules, scanSkeleton, loadClients, loadBuildRecords, setClients, setBuildRecords, setModules]);
 
   // ---- 构建操作 ----
 
@@ -407,6 +424,7 @@ export function useBuildData() {
     isBuilding,
     selectedClientId,
     scanning,
+    skeletonFiles,
     buildLogs,
     showBuildLog,
 

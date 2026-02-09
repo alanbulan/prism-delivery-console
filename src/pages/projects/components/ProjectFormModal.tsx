@@ -7,7 +7,7 @@
  * - 保存前调用 scan_project_modules 校验项目结构（严格模式：校验失败阻止保存）
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import { X, FolderOpen } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { TECH_STACK_OPTIONS } from "../types";
 import type { ProjectFormProps } from "../types";
+import type { TechStackTemplate } from "@/types";
 
 export function ProjectFormModal({
   project,
@@ -34,6 +35,22 @@ export function ProjectFormModal({
   const [modulesDir, setModulesDir] = useState(project?.modules_dir ?? "");
   const [saving, setSaving] = useState(false);
   const isEdit = project !== null;
+
+  // 从数据库加载技术栈模板列表，回退到硬编码选项
+  const [stackOptions, setStackOptions] = useState<{ value: string; label: string }[]>(
+    TECH_STACK_OPTIONS as unknown as { value: string; label: string }[]
+  );
+  useEffect(() => {
+    invoke<TechStackTemplate[]>("db_list_templates")
+      .then((list) => {
+        if (list.length > 0) {
+          setStackOptions(list.map((t) => ({ value: t.name, label: t.name })));
+        }
+      })
+      .catch(() => {
+        // 加载失败时使用硬编码回退
+      });
+  }, []);
 
   /** 打开文件夹选择器选择仓库路径 */
   const handlePickFolder = async () => {
@@ -181,7 +198,7 @@ export function ProjectFormModal({
             onChange={(e) => setTechStack(e.target.value)}
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
           >
-            {TECH_STACK_OPTIONS.map((opt) => (
+            {stackOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

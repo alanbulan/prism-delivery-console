@@ -319,7 +319,7 @@ describe("AppStore", () => {
     it("对任意有效页面 ID，setCurrentPage 后 currentPage 应反映该页面 ID", () => {
       fc.assert(
         fc.property(
-          fc.constantFrom('projects' as const, 'build' as const, 'settings' as const, 'about' as const),
+          fc.constantFrom('projects' as const, 'build' as const, 'analysis' as const, 'templates' as const, 'settings' as const, 'about' as const),
           (pageId) => {
             // 每次迭代前重置 store 到初始状态
             resetStore();

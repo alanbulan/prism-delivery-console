@@ -124,7 +124,7 @@ export interface LlmModel {
 }
 
 /** 页面导航标识 */
-export type PageId = 'projects' | 'build' | 'analysis' | 'settings' | 'about';
+export type PageId = 'projects' | 'build' | 'analysis' | 'templates' | 'settings' | 'about';
 
 /** 文件索引条目（由 scan_project_file_index 返回） */
 export interface FileIndexEntry {
@@ -206,4 +206,26 @@ export interface IndexSignaturesResult {
   total: number;
   /** 成功提取签名的文件数 */
   indexed: number;
+}
+
+/** 技术栈模板，对应数据库 tech_stack_templates 表 */
+export interface TechStackTemplate {
+  /** 模板唯一标识 */
+  id: number;
+  /** 模板名称（唯一） */
+  name: string;
+  /** 模块扫描目录 */
+  modules_dir: string;
+  /** 额外排除目录（JSON 数组字符串） */
+  extra_excludes: string;
+  /** 入口文件路径 */
+  entry_file: string;
+  /** 导入匹配正则 */
+  import_pattern: string;
+  /** 路由注册匹配正则 */
+  router_pattern: string;
+  /** 是否为内置模板 */
+  is_builtin: boolean;
+  /** 创建时间 */
+  created_at: string;
 }

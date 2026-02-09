@@ -43,6 +43,7 @@ pub fn run() {
             // 构建 commands
             commands::build::build_package,
             commands::build::build_project_package,
+            commands::build::scan_project_skeleton,
             commands::build::open_folder,
             // 数据库 CRUD commands
             commands::db_crud::db_create_category,
@@ -72,6 +73,13 @@ pub fn run() {
             // 构建版本号 commands
             commands::db_crud::db_get_next_version,
             commands::db_crud::db_get_last_build_modules,
+            // 技术栈模板 commands
+            commands::db_crud::db_create_template,
+            commands::db_crud::db_list_templates,
+            commands::db_crud::db_update_template,
+            commands::db_crud::db_delete_template,
+            commands::db_crud::export_template_json,
+            commands::db_crud::import_template_json,
             // 项目分析 commands
             commands::analysis::get_llm_config,
             commands::analysis::list_llm_models,

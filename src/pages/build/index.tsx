@@ -8,7 +8,8 @@
  * 需求: 9.1, 9.2, 9.3, 9.4, 9.5, 6.1, 6.2, 6.3
  */
 
-import { Package, Loader2 } from "lucide-react";
+import { Package, Loader2, FolderTree, ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ModuleCard } from "@/components/ModuleCard";
 import { useBuildData } from "./composables/useBuildData";
@@ -26,6 +27,7 @@ export function BuildPage() {
     isBuilding,
     selectedClientId,
     scanning,
+    skeletonFiles,
     buildRecords,
     buildLogs,
     showBuildLog,
@@ -44,6 +46,9 @@ export function BuildPage() {
     getModuleCount,
     reloadClients,
   } = useBuildData();
+
+  // 骨架文件列表折叠状态
+  const [skeletonExpanded, setSkeletonExpanded] = useState(false);
 
   // ---- 空状态：无项目 ----
   if (projects.length === 0) {
@@ -120,6 +125,51 @@ export function BuildPage() {
             ) : (
               <div className="flex items-center justify-center py-8 text-muted-foreground">
                 <p className="text-sm">未扫描到模块</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ---- 项目骨架文件（可折叠） ---- */}
+        {selectedProjectId && skeletonFiles.length > 0 && (
+          <section className="glass flex flex-col gap-2 p-4">
+            <button
+              type="button"
+              onClick={() => setSkeletonExpanded(!skeletonExpanded)}
+              className="flex items-center gap-2 text-left"
+            >
+              {skeletonExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              )}
+              <FolderTree className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold text-foreground">
+                项目骨架
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                （{skeletonFiles.filter((f) => !f.endsWith("/")).length} 个文件，{skeletonFiles.filter((f) => f.endsWith("/")).length} 个目录，构建时自动包含）
+              </span>
+            </button>
+            {skeletonExpanded && (
+              <div className="ml-6 max-h-48 overflow-auto rounded-lg border border-border bg-background/50 p-3">
+                <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
+                  {skeletonFiles.map((f) => {
+                    // 根据路径深度计算缩进层级（每层 1.25rem）
+                    const depth = f.replace(/\/$/, "").split("/").length - 1;
+                    const isDir = f.endsWith("/");
+                    const name = f.replace(/\/$/, "").split("/").pop() ?? f;
+                    return (
+                      <li
+                        key={f}
+                        className={isDir ? "text-foreground/70" : ""}
+                        style={{ paddingLeft: `${depth * 1.25}rem` }}
+                      >
+                        {isDir ? `📁 ${name}/` : `📄 ${name}`}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
           </section>

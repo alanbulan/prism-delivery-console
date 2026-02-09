@@ -65,6 +65,27 @@ pub struct AppSettings {
     pub db_path: String,
 }
 
+/// 技术栈模板
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TechStackTemplate {
+    pub id: i64,
+    /// 模板名称（唯一）
+    pub name: String,
+    /// 模块扫描目录（相对路径，如 "modules"、"src/views"）
+    pub modules_dir: String,
+    /// 额外排除目录（JSON 数组，如 ["dist", ".next"]）
+    pub extra_excludes: String,
+    /// 入口文件路径（如 "main.py"、"src/router/index.ts"）
+    pub entry_file: String,
+    /// 模块导入匹配正则（用于 import 重写）
+    pub import_pattern: String,
+    /// 路由注册匹配正则（用于 router 重写）
+    pub router_pattern: String,
+    /// 是否为内置模板（内置模板不可编辑/删除）
+    pub is_builtin: bool,
+    pub created_at: String,
+}
+
 // ============================================================================
 // 数据库管理器
 // ============================================================================
@@ -208,9 +229,70 @@ impl Database {
                 UNIQUE(project_id, file_path),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            -- 技术栈模板表（可配置的构建策略模板）
+            CREATE TABLE IF NOT EXISTS tech_stack_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                modules_dir TEXT NOT NULL,
+                extra_excludes TEXT NOT NULL DEFAULT '[]',
+                entry_file TEXT NOT NULL DEFAULT '',
+                import_pattern TEXT NOT NULL DEFAULT '',
+                router_pattern TEXT NOT NULL DEFAULT '',
+                is_builtin INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             ",
         )
         .map_err(|e| format!("数据库初始化失败：创建表结构时出错: {}", e))?;
+
+        // 插入内置技术栈模板（仅在表为空时插入，避免重复）
+        Self::seed_builtin_templates(conn)?;
+
+        Ok(())
+    }
+
+    /// 插入内置技术栈模板（FastAPI + Vue3）
+    ///
+    /// 仅在 tech_stack_templates 表为空时执行，确保幂等性。
+    fn seed_builtin_templates(conn: &Connection) -> Result<(), String> {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tech_stack_templates WHERE is_builtin = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if count > 0 {
+            return Ok(()); // 已有内置模板，跳过
+        }
+
+        conn.execute(
+            "INSERT INTO tech_stack_templates (name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+            params![
+                "fastapi",
+                "modules",
+                "[]",
+                "main.py",
+                r"from\s+{modules_dir}\.(\w+)",
+                r"include_router\(",
+            ],
+        )
+        .map_err(|e| format!("插入内置 FastAPI 模板失败：{}", e))?;
+
+        conn.execute(
+            "INSERT INTO tech_stack_templates (name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+            params![
+                "vue3",
+                "src/views",
+                "[]",
+                "src/router/index.ts",
+                r#"import\s+\w+\s+from\s+['"]@/{modules_dir}/(\w+)"#,
+                r#"component:\s*\(\)\s*=>\s*import\("#,
+            ],
+        )
+        .map_err(|e| format!("插入内置 Vue3 模板失败：{}", e))?;
 
         Ok(())
     }
@@ -389,6 +471,35 @@ impl Database {
                 )
                 .map_err(|e| format!("数据库迁移失败：添加 file_size/mtime 列时出错: {}", e))?;
             }
+        }
+
+        // 检查 tech_stack_templates 表是否存在，不存在则创建并插入内置模板
+        let has_templates_table: bool = conn
+            .prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tech_stack_templates'")
+            .and_then(|mut stmt| {
+                let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap_or(0);
+                Ok(count > 0)
+            })
+            .unwrap_or(false);
+
+        if !has_templates_table {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS tech_stack_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    modules_dir TEXT NOT NULL,
+                    extra_excludes TEXT NOT NULL DEFAULT '[]',
+                    entry_file TEXT NOT NULL DEFAULT '',
+                    import_pattern TEXT NOT NULL DEFAULT '',
+                    router_pattern TEXT NOT NULL DEFAULT '',
+                    is_builtin INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            )
+            .map_err(|e| format!("数据库迁移失败：创建 tech_stack_templates 表时出错: {}", e))?;
+
+            // 插入内置模板
+            Self::seed_builtin_templates(conn)?;
         }
 
         Ok(())
@@ -1280,6 +1391,208 @@ impl Database {
             Err(e) => Err(format!("加载客户模块配置失败：{}", e)),
         }
     }
+
+    // ========================================================================
+    // 技术栈模板 CRUD 方法
+    // ========================================================================
+
+    /// 创建自定义技术栈模板
+    ///
+    /// # 参数
+    /// - `name`: 模板名称（必须唯一）
+    /// - `modules_dir`: 模块扫描目录
+    /// - `extra_excludes`: 额外排除目录（JSON 数组字符串）
+    /// - `entry_file`: 入口文件路径
+    /// - `import_pattern`: 导入匹配正则
+    /// - `router_pattern`: 路由注册匹配正则
+    pub fn create_template(
+        &self,
+        name: &str,
+        modules_dir: &str,
+        extra_excludes: &str,
+        entry_file: &str,
+        import_pattern: &str,
+        router_pattern: &str,
+    ) -> Result<TechStackTemplate, String> {
+        self.conn
+            .execute(
+                "INSERT INTO tech_stack_templates (name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                params![name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern],
+            )
+            .map_err(|e| {
+                if let rusqlite::Error::SqliteFailure(ref err, _) = e {
+                    if err.code == rusqlite::ErrorCode::ConstraintViolation {
+                        return "模板名称已存在".to_string();
+                    }
+                }
+                format!("创建模板失败：{}", e)
+            })?;
+
+        let id = self.conn.last_insert_rowid();
+        self.get_template_by_id(id)
+    }
+
+    /// 查询所有技术栈模板（内置 + 自定义，按 is_builtin DESC, id ASC 排序）
+    pub fn list_templates(&self) -> Result<Vec<TechStackTemplate>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin, created_at FROM tech_stack_templates ORDER BY is_builtin DESC, id ASC",
+            )
+            .map_err(|e| format!("查询模板失败：{}", e))?;
+
+        let templates = stmt
+            .query_map([], |row| {
+                Ok(TechStackTemplate {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    modules_dir: row.get(2)?,
+                    extra_excludes: row.get(3)?,
+                    entry_file: row.get(4)?,
+                    import_pattern: row.get(5)?,
+                    router_pattern: row.get(6)?,
+                    is_builtin: row.get::<_, i32>(7)? != 0,
+                    created_at: row.get(8)?,
+                })
+            })
+            .map_err(|e| format!("查询模板失败：{}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("查询模板失败：读取记录时出错: {}", e))?;
+
+        Ok(templates)
+    }
+
+    /// 根据名称查询模板（用于构建时按 tech_stack_type 查找配置）
+    pub fn get_template_by_name(&self, name: &str) -> Result<TechStackTemplate, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin, created_at FROM tech_stack_templates WHERE name = ?1",
+                params![name],
+                |row| {
+                    Ok(TechStackTemplate {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        modules_dir: row.get(2)?,
+                        extra_excludes: row.get(3)?,
+                        entry_file: row.get(4)?,
+                        import_pattern: row.get(5)?,
+                        router_pattern: row.get(6)?,
+                        is_builtin: row.get::<_, i32>(7)? != 0,
+                        created_at: row.get(8)?,
+                    })
+                },
+            )
+            .map_err(|e| {
+                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                    format!("模板不存在：{}", name)
+                } else {
+                    format!("查询模板失败：{}", e)
+                }
+            })
+    }
+
+    /// 根据 ID 查询模板
+    fn get_template_by_id(&self, id: i64) -> Result<TechStackTemplate, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, is_builtin, created_at FROM tech_stack_templates WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(TechStackTemplate {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        modules_dir: row.get(2)?,
+                        extra_excludes: row.get(3)?,
+                        entry_file: row.get(4)?,
+                        import_pattern: row.get(5)?,
+                        router_pattern: row.get(6)?,
+                        is_builtin: row.get::<_, i32>(7)? != 0,
+                        created_at: row.get(8)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("查询模板失败：{}", e))
+    }
+
+    /// 更新自定义模板（内置模板不可修改）
+    pub fn update_template(
+        &self,
+        id: i64,
+        name: &str,
+        modules_dir: &str,
+        extra_excludes: &str,
+        entry_file: &str,
+        import_pattern: &str,
+        router_pattern: &str,
+    ) -> Result<(), String> {
+        // 检查是否为内置模板
+        let is_builtin: bool = self
+            .conn
+            .query_row(
+                "SELECT is_builtin FROM tech_stack_templates WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, i32>(0).map(|v| v != 0),
+            )
+            .map_err(|e| {
+                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                    format!("模板不存在：ID {}", id)
+                } else {
+                    format!("查询模板失败：{}", e)
+                }
+            })?;
+
+        if is_builtin {
+            return Err("内置模板不可修改".to_string());
+        }
+
+        self.conn
+            .execute(
+                "UPDATE tech_stack_templates SET name = ?1, modules_dir = ?2, extra_excludes = ?3, entry_file = ?4, import_pattern = ?5, router_pattern = ?6 WHERE id = ?7",
+                params![name, modules_dir, extra_excludes, entry_file, import_pattern, router_pattern, id],
+            )
+            .map_err(|e| {
+                if let rusqlite::Error::SqliteFailure(ref err, _) = e {
+                    if err.code == rusqlite::ErrorCode::ConstraintViolation {
+                        return "模板名称已存在".to_string();
+                    }
+                }
+                format!("更新模板失败：{}", e)
+            })?;
+
+        Ok(())
+    }
+
+    /// 删除自定义模板（内置模板不可删除）
+    pub fn delete_template(&self, id: i64) -> Result<(), String> {
+        // 检查是否为内置模板
+        let is_builtin: bool = self
+            .conn
+            .query_row(
+                "SELECT is_builtin FROM tech_stack_templates WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, i32>(0).map(|v| v != 0),
+            )
+            .map_err(|e| {
+                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                    format!("模板不存在：ID {}", id)
+                } else {
+                    format!("查询模板失败：{}", e)
+                }
+            })?;
+
+        if is_builtin {
+            return Err("内置模板不可删除".to_string());
+        }
+
+        self.conn
+            .execute(
+                "DELETE FROM tech_stack_templates WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|e| format!("删除模板失败：{}", e))?;
+
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -1312,7 +1625,7 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
 
-        assert_eq!(table_names.len(), 8);
+        assert_eq!(table_names.len(), 9);
         assert!(table_names.contains(&"categories".to_string()));
         assert!(table_names.contains(&"projects".to_string()));
         assert!(table_names.contains(&"clients".to_string()));
@@ -1321,6 +1634,7 @@ mod tests {
         assert!(table_names.contains(&"settings".to_string()));
         assert!(table_names.contains(&"client_module_configs".to_string()));
         assert!(table_names.contains(&"file_index".to_string()));
+        assert!(table_names.contains(&"tech_stack_templates".to_string()));
     }
 
     /// 测试数据库初始化：外键约束已启用
@@ -1356,7 +1670,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
     }
 
     /// 测试数据库初始化：自动创建不存在的目录
@@ -1379,7 +1693,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
     }
 
     /// 测试 categories 表结构：验证列定义

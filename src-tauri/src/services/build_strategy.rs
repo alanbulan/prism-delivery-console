@@ -27,7 +27,7 @@ pub trait BuildStrategy {
     fn tech_stack(&self) -> &str;
 
     /// 获取该技术栈额外需要排除的目录（在 DEFAULT_EXCLUDES 基础上追加）
-    fn extra_excludes(&self) -> &[&str];
+    fn extra_excludes(&self) -> Vec<String>;
 
     /// 获取模块所在的默认子目录名
     fn default_modules_dir(&self) -> &str;
@@ -68,9 +68,9 @@ impl BuildStrategy for FastApiBuildStrategy {
         "fastapi"
     }
 
-    fn extra_excludes(&self) -> &[&str] {
+    fn extra_excludes(&self) -> Vec<String> {
         // FastAPI 项目无额外排除项（DEFAULT_EXCLUDES 已覆盖）
-        &[]
+        vec![]
     }
 
     fn default_modules_dir(&self) -> &str {
@@ -114,9 +114,9 @@ impl BuildStrategy for Vue3BuildStrategy {
         "vue3"
     }
 
-    fn extra_excludes(&self) -> &[&str] {
+    fn extra_excludes(&self) -> Vec<String> {
         // Vue3 项目无额外排除项（DEFAULT_EXCLUDES 已覆盖）
-        &[]
+        vec![]
     }
 
     fn default_modules_dir(&self) -> &str {
@@ -276,14 +276,24 @@ pub fn build_common_with_log(
     // 排除 dist_ 开头的临时目录和 ZIP 文件
     exclude_list.push("dist_");
     exclude_list.push("*.zip");
-    // 追加技术栈额外排除项
-    exclude_list.extend_from_slice(strategy.extra_excludes());
+    // 追加技术栈额外排除项（先存储 owned 值，再借用引用）
+    let extra = strategy.extra_excludes();
+    for ex in &extra {
+        exclude_list.push(ex.as_str());
+    }
 
     log_fn(&format!("→ 复制项目骨架（排除 {} 项噪音目录）...", exclude_list.len()));
     copy_dir_excluding(project_path, &temp_dir, &exclude_list)?;
 
     // 删除骨架中的模块目录内容（后续单独复制选中的模块）
     let skeleton_modules_dir = temp_dir.join(modules_dir_name);
+    // 先备份 modules/__init__.py（如果存在），避免 remove_dir_all 后丢失包初始化逻辑
+    let init_py_backup = skeleton_modules_dir.join("__init__.py");
+    let init_py_content = if init_py_backup.exists() {
+        std::fs::read_to_string(&init_py_backup).ok()
+    } else {
+        None
+    };
     if skeleton_modules_dir.is_dir() {
         std::fs::remove_dir_all(&skeleton_modules_dir)
             .map_err(|e| AppError::BuildError(format!("清理模块目录失败: {}", e)))?;
@@ -328,6 +338,13 @@ pub fn build_common_with_log(
     let modules_dest = temp_dir.join(modules_dir_name);
     std::fs::create_dir_all(&modules_dest)
         .map_err(|e| AppError::BuildError(format!("无法创建 {} 目录: {}", modules_dir_name, e)))?;
+
+    // 恢复 modules/__init__.py（Python 包初始化文件，可能包含 __all__ 等配置）
+    if let Some(ref content) = init_py_content {
+        std::fs::write(modules_dest.join("__init__.py"), content)
+            .map_err(|e| AppError::BuildError(format!("恢复 __init__.py 失败: {}", e)))?;
+        log_fn("  ✓ 已恢复 __init__.py");
+    }
 
     let mut skipped_modules: Vec<String> = Vec::new();
     for module_name in &expanded_modules {
@@ -420,11 +437,82 @@ fn build_common(
 // ============================================================================
 
 /// 根据技术栈类型获取对应的构建策略
+///
+/// 优先匹配内置策略（fastapi/vue3），未匹配时尝试从数据库加载自定义模板
 pub fn get_builder(tech_stack: &str) -> AppResult<Box<dyn BuildStrategy>> {
     match tech_stack {
         "fastapi" => Ok(Box::new(FastApiBuildStrategy)),
         "vue3" => Ok(Box::new(Vue3BuildStrategy)),
         _ => Err(AppError::UnsupportedTechStack(tech_stack.to_string())),
+    }
+}
+
+/// 根据数据库模板配置获取通用构建策略
+///
+/// 供 commands 层在查到自定义模板后调用，避免 services 层直接依赖 Database
+pub fn get_generic_builder(
+    name: String,
+    modules_dir: String,
+    extra_excludes_json: String,
+) -> AppResult<Box<dyn BuildStrategy>> {
+    // 解析额外排除目录 JSON 数组
+    let extra: Vec<String> = serde_json::from_str(&extra_excludes_json).unwrap_or_default();
+    Ok(Box::new(GenericBuildStrategy {
+        name,
+        modules_dir,
+        extra_excludes: extra,
+    }))
+}
+
+// ============================================================================
+// 通用构建策略（基于数据库模板配置）
+// ============================================================================
+
+/// 通用构建策略：从数据库模板读取配置，适用于用户自定义的技术栈
+pub struct GenericBuildStrategy {
+    /// 技术栈名称
+    name: String,
+    /// 模块扫描目录
+    modules_dir: String,
+    /// 额外排除目录列表
+    extra_excludes: Vec<String>,
+}
+
+impl BuildStrategy for GenericBuildStrategy {
+    fn tech_stack(&self) -> &str {
+        &self.name
+    }
+
+    fn extra_excludes(&self) -> Vec<String> {
+        // 返回用户自定义的额外排除目录
+        self.extra_excludes.clone()
+    }
+
+    fn default_modules_dir(&self) -> &str {
+        &self.modules_dir
+    }
+
+    fn build(
+        &self,
+        project_path: &Path,
+        selected_modules: &[String],
+        client_name: &str,
+        modules_dir: &str,
+        all_module_names: &[String],
+    ) -> AppResult<BuildResult> {
+        build_common(self, project_path, selected_modules, client_name, modules_dir, all_module_names)
+    }
+
+    fn build_with_log(
+        &self,
+        project_path: &Path,
+        selected_modules: &[String],
+        client_name: &str,
+        modules_dir: &str,
+        all_module_names: &[String],
+        log_fn: &dyn Fn(&str),
+    ) -> AppResult<BuildResult> {
+        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, all_module_names, log_fn)
     }
 }
 

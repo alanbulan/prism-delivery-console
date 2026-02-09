@@ -30,7 +30,7 @@ function resetStore() {
 }
 
 /** 所有有效页面 ID */
-const ALL_PAGES: PageId[] = ["projects", "build", "analysis", "settings", "about"];
+const ALL_PAGES: PageId[] = ["projects", "build", "analysis", "templates", "settings", "about"];
 
 /** 测试用分类数据 */
 const mockCategories: Category[] = [

@@ -220,6 +220,85 @@ pub fn get_rewriter(tech_stack: &str) -> Option<Box<dyn ImportRewriter>> {
     }
 }
 
+/// 根据数据库模板配置获取通用导入重写器
+///
+/// 当模板的 entry_file 和 import_pattern 均非空时返回 Some，否则返回 None（跳过重写）
+pub fn get_generic_rewriter(
+    entry_file: String,
+    import_pattern: String,
+    router_pattern: String,
+) -> Option<Box<dyn ImportRewriter>> {
+    if entry_file.is_empty() || import_pattern.is_empty() {
+        return None; // 未配置入口文件或导入模式，跳过重写
+    }
+    Some(Box::new(GenericImportRewriter {
+        entry_file,
+        import_pattern,
+        _router_pattern: router_pattern,
+    }))
+}
+
+// ============================================================================
+// 通用导入重写器（基于正则模式匹配）
+// ============================================================================
+
+/// 通用导入重写器：使用用户配置的正则表达式匹配模块导入
+///
+/// import_pattern 中的 `{modules_dir}` 占位符会在运行时替换为实际模块目录。
+/// 正则的第一个捕获组应为模块名。
+pub struct GenericImportRewriter {
+    entry_file: String,
+    import_pattern: String,
+    _router_pattern: String,
+}
+
+impl ImportRewriter for GenericImportRewriter {
+    fn entry_file(&self) -> &str {
+        &self.entry_file
+    }
+
+    fn rewrite(
+        &self,
+        content: &str,
+        selected_modules: &[String],
+        modules_dir: &str,
+    ) -> String {
+        // 将 {modules_dir} 占位符替换为实际值，构建正则
+        let pattern_str = self.import_pattern.replace("{modules_dir}", modules_dir);
+        let re = match regex::Regex::new(&pattern_str) {
+            Ok(r) => r,
+            Err(_) => return content.to_string(), // 正则无效，原样返回
+        };
+
+        let selected: std::collections::HashSet<&str> =
+            selected_modules.iter().map(|s| s.as_str()).collect();
+
+        // 逐行过滤：匹配到模块导入且模块名不在选中列表中 → 移除
+        content
+            .lines()
+            .filter(|line| {
+                if let Some(caps) = re.captures(line) {
+                    if let Some(module_name) = caps.get(1) {
+                        return selected.contains(module_name.as_str());
+                    }
+                }
+                true // 非模块导入行 → 保留
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn validate(
+        &self,
+        _content: &str,
+        _build_dir: &Path,
+        _modules_dir: &str,
+    ) -> Vec<String> {
+        // 通用重写器暂不做深度校验，返回空列表表示通过
+        Vec::new()
+    }
+}
+
 // ============================================================================
 // Vue3 路由重写核心逻辑（供 Vue3ImportRewriter 使用）
 // ============================================================================
@@ -437,13 +516,31 @@ fn extract_import_call_path(line: &str) -> Option<String> {
 /// 路由对象通常以 `{` 开头（可能前面有空格或逗号），
 /// 且包含 path/component/name 等路由属性的上下文中
 fn is_route_object_start(trimmed: &str) -> bool {
-    // 以 { 开头，且不是函数体、export 等
+    // 必须以 { 开头
     if !trimmed.starts_with('{') {
         return false;
     }
-    // 排除 `{ path: ... }` 在同一行闭合且不含路由特征的情况
-    // 简单判断：以 { 开头就认为可能是路由对象
-    true
+    // 排除解构赋值（如 `const { createRouter } = ...`）和非路由对象
+    // 路由对象通常包含 path/component/name 等关键字
+    // 简单启发式：如果同一行包含路由特征关键字，或者是纯 { 开头（多行路由对象），则认为是路由对象
+    let rest = &trimmed[1..].trim_start();
+    // 纯 `{` 或 `{` 后跟路由特征关键字（path:, name:, component:, redirect:, children:）
+    if rest.is_empty() || *rest == "}" {
+        return true;
+    }
+    // 检查是否包含路由对象的典型属性
+    rest.starts_with("path:")
+        || rest.starts_with("path :")
+        || rest.starts_with("name:")
+        || rest.starts_with("name :")
+        || rest.starts_with("component:")
+        || rest.starts_with("component :")
+        || rest.starts_with("redirect:")
+        || rest.starts_with("redirect :")
+        || rest.starts_with("children:")
+        || rest.starts_with("children :")
+        || rest.starts_with("meta:")
+        || rest.starts_with("meta :")
 }
 
 /// 从指定行开始，收集完整的花括号块（处理嵌套）

@@ -85,6 +85,40 @@ pub fn get_scanner(tech_stack: &str) -> AppResult<Box<dyn ScanStrategy>> {
     }
 }
 
+/// 根据数据库模板配置获取通用扫描策略
+///
+/// 供 commands 层在查到自定义模板后调用
+pub fn get_generic_scanner(modules_dir: String) -> Box<dyn ScanStrategy> {
+    Box::new(GenericScanner { modules_dir })
+}
+
+// ============================================================================
+// 通用扫描策略（基于数据库模板配置）
+// ============================================================================
+
+/// 通用扫描策略：使用模板中配置的 modules_dir 扫描模块
+pub struct GenericScanner {
+    modules_dir: String,
+}
+
+impl ScanStrategy for GenericScanner {
+    fn scan(&self, project_path: &Path, modules_dir: &str) -> AppResult<Vec<ModuleInfo>> {
+        // 用户自定义目录优先，为空则使用模板默认值
+        let dir_name = if modules_dir.is_empty() {
+            &self.modules_dir
+        } else {
+            modules_dir
+        };
+        let target_dir = project_path.join(dir_name);
+        if !target_dir.is_dir() {
+            return Err(AppError::ScanError(
+                format!("项目应包含 {} 目录", dir_name),
+            ));
+        }
+        crate::services::scanner::scan_modules_dir(&target_dir)
+    }
+}
+
 
 // ============================================================================
 // 单元测试

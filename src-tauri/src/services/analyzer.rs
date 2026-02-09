@@ -1038,6 +1038,9 @@ fn scan_module_imports(
     // Vue3/JS import 前缀
     let vue_prefix = format!("@/{}", modules_dir.strip_prefix("src/").unwrap_or(modules_dir));
 
+    // 相对导入解析需要 modules 目录的绝对路径（module_path 的父目录）
+    let modules_dir_path = module_path.parent().unwrap_or(module_path);
+
     for entry in walkdir::WalkDir::new(module_path)
         .into_iter()
         .filter_entry(|e| {
@@ -1075,12 +1078,19 @@ fn scan_module_imports(
                 continue;
             }
 
-            // Python: from {prefix}.xxx... import ...
+            // Python: from {prefix}.xxx... import ...（绝对导入）
             if trimmed.starts_with("from ") {
                 if let Some(module) = extract_module_ref_from_python(trimmed, &py_prefix) {
                     if all_modules.contains(module.as_str()) {
                         deps.insert(module);
                     }
+                }
+
+                // Python: from ..xxx import ...（相对导入，跨模块引用）
+                if let Some(module) = extract_relative_import_module(
+                    trimmed, path, modules_dir_path, all_modules,
+                ) {
+                    deps.insert(module);
                 }
             }
 
@@ -1099,6 +1109,16 @@ fn scan_module_imports(
                     if all_modules.contains(module.as_str()) {
                         deps.insert(module);
                     }
+                }
+            }
+
+            // JS/TS: 相对路径 import（如 import xxx from '../../other-module/...'）
+            // 解析相对路径，判断是否指向其他模块目录
+            if trimmed.contains("from '..") || trimmed.contains("from \"..") || trimmed.contains("import('..") {
+                if let Some(module) = extract_relative_js_import_module(
+                    trimmed, path, modules_dir_path, all_modules,
+                ) {
+                    deps.insert(module);
                 }
             }
         }
@@ -1142,6 +1162,70 @@ fn extract_module_ref_from_python_import(line: &str, prefix: &str) -> Option<Str
     }
     Some(module_name.to_string())
 }
+/// 从 Python 相对导入语句中提取跨模块引用
+///
+/// 处理 `from ..other_module import xxx` 这种相对导入模式。
+/// 通过计算 ".." 的层级，判断是否跨越了模块边界引用了其他模块。
+/// - `file_path`: 当前文件的绝对路径
+/// - `modules_dir_path`: modules 目录的绝对路径
+/// - `all_modules`: 所有已知模块名集合
+fn extract_relative_import_module(
+    line: &str,
+    file_path: &Path,
+    modules_dir_path: &Path,
+    all_modules: &HashSet<&str>,
+) -> Option<String> {
+    // 仅处理 "from .xxx import ..." 格式
+    let after_from = line.strip_prefix("from ")?.trim_start();
+    if !after_from.starts_with('.') {
+        return None;
+    }
+
+    let import_pos = after_from.find(" import ")?;
+    let relative_path = after_from[..import_pos].trim();
+
+    // 计算前导点数（.. = 2 层，... = 3 层）
+    let dot_count = relative_path.chars().take_while(|&c| c == '.').count();
+    if dot_count < 2 {
+        // 单个点 "from .xxx" 是同包内导入，不涉及跨模块
+        return None;
+    }
+
+    // 剩余部分是目标模块/包名
+    let remainder = &relative_path[dot_count..];
+
+    // 从文件路径推算当前所在目录相对于 modules_dir 的深度
+    let file_dir = file_path.parent()?;
+    let rel_to_modules = file_dir.strip_prefix(modules_dir_path).ok()?;
+    let depth = rel_to_modules.components().count(); // 例如 modules/auth/sub/ → depth=2
+
+    // ".." 需要 depth >= dot_count-1 才能回到 modules/ 级别
+    // 例如在 modules/auth/service.py 中 depth=1，from ..billing → dot_count=2
+    // 需要 depth >= dot_count - 1 = 1 ✓，回到 modules/ 后取 "billing"
+    if depth < dot_count - 1 {
+        return None; // 超出 modules 目录范围，忽略
+    }
+
+    // 如果 dot_count - 1 == depth，说明回到了 modules/ 级别
+    // remainder 的第一个部分就是目标模块名
+    if dot_count - 1 == depth {
+        let target_module = if remainder.is_empty() {
+            return None; // "from .. import xxx" — 导入 modules 包本身，非跨模块
+        } else {
+            // "from ..billing.models import ..." → target = "billing"
+            match remainder.find('.') {
+                Some(pos) => &remainder[..pos],
+                None => remainder,
+            }
+        };
+
+        if !target_module.is_empty() && all_modules.contains(target_module) {
+            return Some(target_module.to_string());
+        }
+    }
+
+    None
+}
 
 /// 从 JS/TS import 语句中提取模块名
 ///
@@ -1159,6 +1243,91 @@ fn extract_module_ref_from_js(line: &str, vue_prefix: &str) -> Option<String> {
         return None;
     }
     Some(module_name.to_string())
+}
+
+/// 从 JS/TS 相对路径 import 中解析跨模块依赖
+///
+/// 处理 `import xxx from '../../other-module/...'` 或 `import('../../other-module/...')`
+/// 通过当前文件路径 + 相对路径计算目标绝对路径，判断是否落在其他模块目录中。
+fn extract_relative_js_import_module(
+    line: &str,
+    current_file: &Path,
+    modules_dir_path: &Path,
+    all_modules: &HashSet<&str>,
+) -> Option<String> {
+    // 提取引号中的相对路径
+    let rel_path = extract_relative_path_from_js(line)?;
+
+    // 必须以 ".." 开头（跨目录引用才可能跨模块）
+    if !rel_path.starts_with("..") {
+        return None;
+    }
+
+    // 基于当前文件所在目录解析相对路径
+    let current_dir = current_file.parent()?;
+    let resolved = current_dir.join(&rel_path);
+    // 规范化路径（消除 .. 和 .）
+    let canonical = normalize_path_buf(&resolved);
+
+    // 检查解析后的路径是否落在 modules_dir_path 下的某个模块中
+    let relative_to_modules = canonical.strip_prefix(modules_dir_path).ok()?;
+    let components: Vec<&std::ffi::OsStr> = relative_to_modules.components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect();
+
+    // 第一个路径组件就是模块名
+    let module_name = components.first()?.to_str()?;
+    if all_modules.contains(module_name) {
+        Some(module_name.to_string())
+    } else {
+        None
+    }
+}
+
+/// 从 JS/TS import 语句中提取引号内的相对路径
+fn extract_relative_path_from_js(line: &str) -> Option<String> {
+    // 匹配 from '...' 或 from "..." 或 import('...') 或 import("...")
+    for quote in ['\'', '"'] {
+        // from '...'
+        let from_pattern = format!("from {}", quote);
+        if let Some(pos) = line.find(&from_pattern) {
+            let start = pos + from_pattern.len();
+            let rest = &line[start..];
+            if let Some(end) = rest.find(quote) {
+                return Some(rest[..end].to_string());
+            }
+        }
+        // import('...')
+        let import_pattern = format!("import({}", quote);
+        if let Some(pos) = line.find(&import_pattern) {
+            let start = pos + import_pattern.len();
+            let rest = &line[start..];
+            if let Some(end) = rest.find(quote) {
+                return Some(rest[..end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 规范化路径（消除 `..` 和 `.` 组件，不依赖文件系统）
+fn normalize_path_buf(path: &Path) -> std::path::PathBuf {
+    let mut result = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                result.pop();
+            }
+            std::path::Component::CurDir => {}
+            _ => {
+                result.push(component);
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]

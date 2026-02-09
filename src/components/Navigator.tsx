@@ -13,7 +13,7 @@
  * - 应用 Liquid Glass glass-panel 样式
  */
 
-import { FolderKanban, Package, Settings, Info, PanelLeftClose, PanelLeftOpen, Network } from "lucide-react";
+import { FolderKanban, Package, Settings, Info, PanelLeftClose, PanelLeftOpen, Network, Blocks } from "lucide-react";
 import { useAppStore } from "@/store";
 import type { PageId } from "@/types";
 import type { LucideIcon } from "lucide-react";
@@ -33,6 +33,7 @@ const MAIN_NAV_ITEMS: NavItem[] = [
   { id: "projects", label: "项目管理", icon: FolderKanban },
   { id: "build", label: "构建交付", icon: Package },
   { id: "analysis", label: "项目分析", icon: Network },
+  { id: "templates", label: "模板管理", icon: Blocks },
 ];
 
 /** 底部导航项 */

@@ -8,7 +8,7 @@
 // ⛔ 禁止：包含业务逻辑
 // ============================================================================
 
-use crate::database::{BuildRecord, Category, Client, Database, Project};
+use crate::database::{BuildRecord, Category, Client, Database, Project, TechStackTemplate};
 use std::sync::Mutex;
 use tauri::State;
 
@@ -382,4 +382,106 @@ pub async fn db_get_last_build_modules(
         .lock()
         .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
     db.get_last_build_modules(client_id, project_id)
+}
+
+// ============================================================================
+// 技术栈模板 Commands
+// ============================================================================
+
+/// 创建自定义技术栈模板
+#[tauri::command]
+pub async fn db_create_template(
+    db: State<'_, Mutex<Database>>,
+    name: String,
+    modules_dir: String,
+    extra_excludes: String,
+    entry_file: String,
+    import_pattern: String,
+    router_pattern: String,
+) -> Result<TechStackTemplate, String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    db.create_template(&name, &modules_dir, &extra_excludes, &entry_file, &import_pattern, &router_pattern)
+}
+
+/// 查询所有技术栈模板
+#[tauri::command]
+pub async fn db_list_templates(
+    db: State<'_, Mutex<Database>>,
+) -> Result<Vec<TechStackTemplate>, String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    db.list_templates()
+}
+
+/// 更新自定义技术栈模板（内置模板不可修改）
+#[tauri::command]
+pub async fn db_update_template(
+    db: State<'_, Mutex<Database>>,
+    id: i64,
+    name: String,
+    modules_dir: String,
+    extra_excludes: String,
+    entry_file: String,
+    import_pattern: String,
+    router_pattern: String,
+) -> Result<(), String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    db.update_template(id, &name, &modules_dir, &extra_excludes, &entry_file, &import_pattern, &router_pattern)
+}
+
+/// 删除自定义技术栈模板（内置模板不可删除）
+#[tauri::command]
+pub async fn db_delete_template(
+    db: State<'_, Mutex<Database>>,
+    id: i64,
+) -> Result<(), String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    db.delete_template(id)
+}
+
+/// 导出模板为 JSON 字符串（用于分享/备份）
+#[tauri::command]
+pub async fn export_template_json(
+    db: State<'_, Mutex<Database>>,
+    id: i64,
+) -> Result<String, String> {
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    let templates = db.list_templates()?;
+    let template = templates
+        .into_iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("模板不存在：ID {}", id))?;
+    serde_json::to_string_pretty(&template)
+        .map_err(|e| format!("序列化模板失败：{}", e))
+}
+
+/// 从 JSON 字符串导入模板（创建新的自定义模板）
+#[tauri::command]
+pub async fn import_template_json(
+    db: State<'_, Mutex<Database>>,
+    json_str: String,
+) -> Result<TechStackTemplate, String> {
+    // 反序列化 JSON，提取字段创建新模板
+    let imported: TechStackTemplate = serde_json::from_str(&json_str)
+        .map_err(|e| format!("JSON 格式错误：{}", e))?;
+    let db = db
+        .lock()
+        .map_err(|_| "数据库访问失败：无法获取锁".to_string())?;
+    db.create_template(
+        &imported.name,
+        &imported.modules_dir,
+        &imported.extra_excludes,
+        &imported.entry_file,
+        &imported.import_pattern,
+        &imported.router_pattern,
+    )
 }

@@ -70,6 +70,75 @@ pub fn scan_modules_dir(modules_path: &std::path::Path) -> AppResult<Vec<ModuleI
 
     Ok(modules)
 }
+/// 扫描项目骨架文件树（排除模块目录和默认排除项）
+///
+/// 返回项目中除模块目录外的所有文件/目录的相对路径列表，
+/// 让用户清楚交付包中除了选中模块还包含哪些核心骨架文件。
+pub fn scan_skeleton_files(
+    project_path: &std::path::Path,
+    modules_dir: &str,
+    extra_excludes: &[&str],
+) -> AppResult<Vec<String>> {
+    use crate::services::DEFAULT_EXCLUDES;
+
+    if !project_path.is_dir() {
+        return Err(AppError::ScanError("项目路径不存在".to_string()));
+    }
+
+    // 合并排除列表：默认排除 + 模块目录 + 额外排除 + 构建产物
+    let mut excludes: Vec<&str> = DEFAULT_EXCLUDES.to_vec();
+    excludes.push(modules_dir);
+    excludes.extend_from_slice(extra_excludes);
+    excludes.push("dist_");
+    excludes.push("*.zip");
+
+    let mut skeleton: Vec<String> = Vec::new();
+
+    for entry in walkdir::WalkDir::new(project_path)
+        .min_depth(1)
+        .max_depth(3) // 限制深度避免过深遍历
+        .into_iter()
+        .filter_entry(|e| {
+            if let Some(name) = e.file_name().to_str() {
+                for pattern in &excludes {
+                    if pattern.ends_with('_') && name.starts_with(*pattern) {
+                        return false;
+                    }
+                    if pattern.starts_with("*.") {
+                        let suffix = &pattern[1..];
+                        if name.ends_with(suffix) {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if pattern.starts_with('.') && name == *pattern {
+                        return false;
+                    }
+                    if name == *pattern {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+    {
+        let entry = entry.map_err(|e| AppError::ScanError(format!("遍历失败: {}", e)))?;
+        let relative = entry
+            .path()
+            .strip_prefix(project_path)
+            .map_err(|e| AppError::ScanError(format!("路径处理失败: {}", e)))?;
+
+        let rel_str = relative.to_string_lossy().replace('\\', "/");
+        if entry.file_type().is_dir() {
+            skeleton.push(format!("{}/", rel_str));
+        } else {
+            skeleton.push(rel_str.to_string());
+        }
+    }
+
+    skeleton.sort();
+    Ok(skeleton)
+}
 
 
 // ============================================================================

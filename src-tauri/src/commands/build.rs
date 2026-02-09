@@ -83,6 +83,32 @@ pub async fn build_project_package(
     .map_err(|e| e.to_string())
 }
 
+/// 扫描项目骨架文件树（排除模块目录和默认排除项）
+///
+/// 返回项目中除模块目录外的骨架文件相对路径列表，
+/// 用于前端展示交付包中包含的核心文件结构。
+#[tauri::command]
+pub async fn scan_project_skeleton(
+    project_path: String,
+    tech_stack: String,
+    modules_dir: String,
+) -> Result<Vec<String>, String> {
+    let builder = build_strategy::get_builder(&tech_stack).map_err(|e| e.to_string())?;
+    let path = std::path::Path::new(&project_path);
+
+    let modules_dir_name = if modules_dir.is_empty() {
+        builder.default_modules_dir()
+    } else {
+        &modules_dir
+    };
+
+    // 获取额外排除项并转换为引用切片
+    let extra = builder.extra_excludes();
+    let extra_refs: Vec<&str> = extra.iter().map(|s| s.as_str()).collect();
+    scanner::scan_skeleton_files(path, modules_dir_name, &extra_refs)
+        .map_err(|e| e.to_string())
+}
+
 /// 打开文件夹：在系统文件管理器中打开指定路径（并选中该文件）
 #[tauri::command]
 pub async fn open_folder(path: String) -> Result<(), String> {
