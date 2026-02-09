@@ -5,6 +5,7 @@
 
 use crate::models::dtos::BuildResult;
 use crate::services::build_strategy::{self, BuildStrategy};
+use crate::services::scanner;
 use tauri::Emitter;
 
 /// 构建交付包（V1 兼容接口）：委托给 FastAPI 构建策略
@@ -17,13 +18,21 @@ pub async fn build_package(
     selected_modules: Vec<String>,
     client_name: String,
 ) -> Result<BuildResult, String> {
-    // 直接委托给 FastAPI 构建策略（V1 仅支持 FastAPI 项目，使用默认 modules 目录）
+    let path = std::path::Path::new(&project_path);
+    // 扫描所有模块名用于依赖分析
+    let all_module_names: Vec<String> = scanner::scan_modules_dir(&path.join("modules"))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+
     let builder = build_strategy::FastApiBuildStrategy;
     builder.build(
-        std::path::Path::new(&project_path),
+        path,
         &selected_modules,
         &client_name,
         "",
+        &all_module_names,
     )
     .map_err(|e| e.to_string())
 }
@@ -31,8 +40,7 @@ pub async fn build_package(
 /// 构建项目交付包（多技术栈支持，带实时日志推送）
 ///
 /// 根据技术栈类型调用对应的构建策略，通过 Tauri Event 向前端推送构建日志。
-/// 注意：此 command 不创建构建记录，前端应在构建成功后单独调用
-/// db_create_build_record 来记录构建历史。
+/// 构建前自动扫描所有模块名，用于 BFS 传递依赖分析。
 #[tauri::command]
 pub async fn build_project_package(
     app: tauri::AppHandle,
@@ -43,6 +51,21 @@ pub async fn build_project_package(
     modules_dir: String,
 ) -> Result<BuildResult, String> {
     let builder = build_strategy::get_builder(&tech_stack).map_err(|e| e.to_string())?;
+    let path = std::path::Path::new(&project_path);
+
+    // 确定模块目录（用户自定义优先，否则使用策略默认值）
+    let modules_dir_name = if modules_dir.is_empty() {
+        builder.default_modules_dir()
+    } else {
+        &modules_dir
+    };
+
+    // 扫描所有模块名用于依赖分析
+    let all_module_names: Vec<String> = scanner::scan_modules_dir(&path.join(modules_dir_name))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
 
     // 构建日志回调：通过 Tauri Event 推送到前端
     let log_fn = |msg: &str| {
@@ -50,10 +73,11 @@ pub async fn build_project_package(
     };
 
     builder.build_with_log(
-        std::path::Path::new(&project_path),
+        path,
         &selected_modules,
         &client_name,
         &modules_dir,
+        &all_module_names,
         &log_fn,
     )
     .map_err(|e| e.to_string())

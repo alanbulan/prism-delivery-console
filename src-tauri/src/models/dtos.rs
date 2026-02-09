@@ -34,6 +34,9 @@ pub struct BuildResult {
     pub zip_path: String,
     /// 客户名称
     pub client_name: String,
-    /// 包含的业务模块数量
+    /// 包含的业务模块数量（含自动补充的依赖模块）
     pub module_count: usize,
+    /// 实际打包的完整模块列表（用户选中 + 依赖分析自动补充）
+    /// 前端应使用此字段保存构建记录，而非原始 selectedModules
+    pub expanded_modules: Vec<String>,
 }

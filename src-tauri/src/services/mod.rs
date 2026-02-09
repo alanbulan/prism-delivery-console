@@ -29,3 +29,30 @@ pub const CORE_FILES: &[&str] = &[
 
 /// 忽略条目列表：扫描 modules/ 目录时需要跳过的目录/文件名
 pub const IGNORED_ENTRIES: &[&str] = &["__pycache__", ".git", ".DS_Store"];
+/// 构建时默认排除的目录列表
+/// 这些目录不应出现在交付包中（版本控制、依赖缓存、构建产物、敏感文件等）
+pub const DEFAULT_EXCLUDES: &[&str] = &[
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".idea",
+    ".vscode",
+    ".DS_Store",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    "eggs",
+    "*.egg-info",
+    // 敏感文件：防止泄露数据库密码、API Key 等
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+];

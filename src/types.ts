@@ -25,8 +25,10 @@ export interface BuildResult {
   zip_path: string;
   /** 客户名称 */
   client_name: string;
-  /** 包含的模块数量 */
+  /** 包含的模块数量（含自动补充的依赖模块） */
   module_count: number;
+  /** 实际打包的完整模块列表（用户选中 + 依赖分析自动补充） */
+  expanded_modules: string[];
 }
 
 // ============================================================

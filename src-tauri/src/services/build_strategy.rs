@@ -11,9 +11,10 @@ use std::path::Path;
 use time::OffsetDateTime;
 
 use crate::models::dtos::BuildResult;
-use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
+use crate::services::analyzer;
+use crate::services::packer::{copy_dir_excluding, create_zip_from_dir, validate_build_params};
 use crate::services::module_rewriter;
-use crate::services::CORE_FILES;
+use crate::services::DEFAULT_EXCLUDES;
 use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
@@ -25,20 +26,22 @@ pub trait BuildStrategy {
     /// 该策略对应的技术栈标识（如 "fastapi"、"vue3"）
     fn tech_stack(&self) -> &str;
 
-    /// 获取该技术栈的核心文件列表
-    fn core_files(&self) -> &[&str];
+    /// 获取该技术栈额外需要排除的目录（在 DEFAULT_EXCLUDES 基础上追加）
+    fn extra_excludes(&self) -> &[&str];
 
     /// 获取模块所在的默认子目录名
     fn default_modules_dir(&self) -> &str;
 
     /// 执行构建打包
     /// - `modules_dir`: 用户自定义的模块目录（相对路径），为空则使用默认值
+    /// - `all_module_names`: 项目中所有可用模块名（用于依赖分析）
     fn build(
         &self,
         project_path: &Path,
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
     ) -> AppResult<BuildResult>;
 
     /// 执行构建打包（带日志回调，用于实时推送构建进度）
@@ -48,6 +51,7 @@ pub trait BuildStrategy {
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
         log_fn: &dyn Fn(&str),
     ) -> AppResult<BuildResult>;
 }
@@ -56,7 +60,7 @@ pub trait BuildStrategy {
 // FastAPI 构建策略
 // ============================================================================
 
-/// FastAPI 构建策略：复制核心文件 + modules/ 子目录
+/// FastAPI 构建策略：排除式骨架复制 + 依赖分析 + 模块提取
 pub struct FastApiBuildStrategy;
 
 impl BuildStrategy for FastApiBuildStrategy {
@@ -64,8 +68,9 @@ impl BuildStrategy for FastApiBuildStrategy {
         "fastapi"
     }
 
-    fn core_files(&self) -> &[&str] {
-        CORE_FILES
+    fn extra_excludes(&self) -> &[&str] {
+        // FastAPI 项目无额外排除项（DEFAULT_EXCLUDES 已覆盖）
+        &[]
     }
 
     fn default_modules_dir(&self) -> &str {
@@ -78,8 +83,9 @@ impl BuildStrategy for FastApiBuildStrategy {
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
     ) -> AppResult<BuildResult> {
-        build_common(self, project_path, selected_modules, client_name, modules_dir)
+        build_common(self, project_path, selected_modules, client_name, modules_dir, all_module_names)
     }
 
     fn build_with_log(
@@ -88,9 +94,10 @@ impl BuildStrategy for FastApiBuildStrategy {
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
         log_fn: &dyn Fn(&str),
     ) -> AppResult<BuildResult> {
-        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, log_fn)
+        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, all_module_names, log_fn)
     }
 }
 
@@ -99,15 +106,7 @@ impl BuildStrategy for FastApiBuildStrategy {
 // Vue3 构建策略
 // ============================================================================
 
-/// Vue3 核心配置文件列表
-const VUE3_CORE_FILES: &[&str] = &[
-    "package.json",
-    "vite.config.ts",
-    "tsconfig.json",
-    "index.html",
-];
-
-/// Vue3 构建策略：复制项目配置文件 + src/views/ 子目录
+/// Vue3 构建策略：排除式骨架复制 + 依赖分析 + 模块提取
 pub struct Vue3BuildStrategy;
 
 impl BuildStrategy for Vue3BuildStrategy {
@@ -115,8 +114,9 @@ impl BuildStrategy for Vue3BuildStrategy {
         "vue3"
     }
 
-    fn core_files(&self) -> &[&str] {
-        VUE3_CORE_FILES
+    fn extra_excludes(&self) -> &[&str] {
+        // Vue3 项目无额外排除项（DEFAULT_EXCLUDES 已覆盖）
+        &[]
     }
 
     fn default_modules_dir(&self) -> &str {
@@ -129,8 +129,9 @@ impl BuildStrategy for Vue3BuildStrategy {
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
     ) -> AppResult<BuildResult> {
-        build_common(self, project_path, selected_modules, client_name, modules_dir)
+        build_common(self, project_path, selected_modules, client_name, modules_dir, all_module_names)
     }
 
     fn build_with_log(
@@ -139,9 +140,10 @@ impl BuildStrategy for Vue3BuildStrategy {
         selected_modules: &[String],
         client_name: &str,
         modules_dir: &str,
+        all_module_names: &[String],
         log_fn: &dyn Fn(&str),
     ) -> AppResult<BuildResult> {
-        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, log_fn)
+        build_common_with_log(self, project_path, selected_modules, client_name, modules_dir, all_module_names, log_fn)
     }
 }
 
@@ -165,16 +167,21 @@ fn timestamp_suffix() -> String {
     )
 }
 
-/// 带日志回调的通用构建流程
+/// 带日志回调的通用构建流程（V2：排除式骨架 + 依赖分析）
 ///
-/// `log_fn` 在每个关键步骤完成时被调用，用于向前端推送实时日志。
-/// 传入空闭包 `|_|{}` 即可静默执行（单元测试场景）。
+/// 构建流程：
+/// 1. 复制项目骨架（排除模块目录 + DEFAULT_EXCLUDES + 技术栈额外排除项）
+/// 2. 依赖分析：BFS 遍历选中模块的 import，自动补充被依赖的模块
+/// 3. 复制扩展后的完整模块列表到骨架中
+/// 4. 重写入口文件（仅保留选中+依赖模块的 import）
+/// 5. 打包为 ZIP
 pub fn build_common_with_log(
     strategy: &dyn BuildStrategy,
     project_path: &Path,
     selected_modules: &[String],
     client_name: &str,
     modules_dir_override: &str,
+    all_module_names: &[String],
     log_fn: &dyn Fn(&str),
 ) -> AppResult<BuildResult> {
     // 1. 验证构建参数
@@ -188,7 +195,7 @@ pub fn build_common_with_log(
         modules_dir_override
     };
 
-    // 风险点1：路径含空格/特殊字符时记录警告（Rust Path API 本身可正确处理）
+    // 路径含空格/特殊字符时记录警告
     let path_str = project_path.to_string_lossy();
     if path_str.contains(' ') || path_str.chars().any(|c| c > '\x7F') {
         log::warn!(
@@ -197,7 +204,7 @@ pub fn build_common_with_log(
         );
     }
 
-    // 风险点4+5：使用时间戳后缀避免临时目录和 ZIP 文件名冲突
+    // 时间戳后缀避免临时目录和 ZIP 文件名冲突
     let ts = timestamp_suffix();
     let dist_name = format!("dist_{}_{}", client_name.trim(), ts);
     let temp_dir = project_path.join(&dist_name);
@@ -208,74 +215,95 @@ pub fn build_common_with_log(
         .map_err(|e| AppError::BuildError(format!("无法创建临时目录: {}", e)))?;
     log_fn(&format!("→ 创建临时目录: {}", dist_name));
 
-    // 3. 使用 scopeguard 确保临时目录在任何情况下都会被清理
+    // scopeguard 确保临时目录在任何情况下都会被清理
     let temp_dir_path = temp_dir.clone();
     let _guard = scopeguard::guard((), |_| {
         let _ = std::fs::remove_dir_all(&temp_dir_path);
     });
 
-    // 4. 复制核心文件
-    let core_files_list: Vec<&str> = strategy.core_files().iter()
-        .filter(|&&f| project_path.join(f).exists())
-        .copied()
-        .collect();
-    log_fn(&format!("→ 复制核心文件: {}", core_files_list.join(", ")));
-    for &core_item in strategy.core_files() {
-        let source = project_path.join(core_item);
-        if !source.exists() {
-            continue;
-        }
+    // 3. 排除式骨架复制：复制整个项目，排除默认排除项 + 技术栈额外排除项
+    //    这样 main.py、config/、utils/、package.json、src/router/ 等全部自动包含
+    let mut exclude_list: Vec<&str> = DEFAULT_EXCLUDES.to_vec();
+    // 排除 dist_ 开头的临时目录和 ZIP 文件
+    exclude_list.push("dist_");
+    exclude_list.push("*.zip");
+    // 追加技术栈额外排除项
+    exclude_list.extend_from_slice(strategy.extra_excludes());
 
-        if source.is_dir() {
-            let dir_name = core_item.trim_end_matches('/');
-            let dest = temp_dir.join(dir_name);
-            copy_dir_recursive(&source, &dest)?;
-        } else {
-            let dest = temp_dir.join(core_item);
-            // 确保父目录存在（处理嵌套路径如 "src/views"）
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| AppError::BuildError(format!("无法创建目录 {}: {}", parent.display(), e)))?;
-            }
-            std::fs::copy(&source, &dest)
-                .map_err(|e| AppError::BuildError(format!("复制文件时出错 - 无法复制 {}: {}", core_item, e)))?;
-        }
+    log_fn(&format!("→ 复制项目骨架（排除 {} 项噪音目录）...", exclude_list.len()));
+    copy_dir_excluding(project_path, &temp_dir, &exclude_list)?;
+
+    // 删除骨架中的模块目录内容（后续单独复制选中的模块）
+    let skeleton_modules_dir = temp_dir.join(modules_dir_name);
+    if skeleton_modules_dir.is_dir() {
+        std::fs::remove_dir_all(&skeleton_modules_dir)
+            .map_err(|e| AppError::BuildError(format!("清理模块目录失败: {}", e)))?;
     }
-    log_fn(&format!("✓ 核心文件复制完成 ({} 个)", core_files_list.len()));
+    log_fn("✓ 项目骨架复制完成");
 
-    // 5. 创建模块子目录并复制选中的模块
-    log_fn(&format!("→ 复制模块: {}", selected_modules.join(", ")));
+    // 4. 依赖分析：BFS 遍历选中模块的 import，自动补充被依赖的模块
+    log_fn(&format!("→ 依赖分析：选中模块 [{}]", selected_modules.join(", ")));
+    let (expanded_modules, auto_added) = if all_module_names.is_empty() {
+        // 没有提供全部模块名时跳过依赖分析（向后兼容）
+        log_fn("  ⚠ 未提供模块列表，跳过依赖分析");
+        (selected_modules.to_vec(), Vec::new())
+    } else {
+        match analyzer::resolve_module_dependencies(
+            project_path,
+            modules_dir_name,
+            selected_modules,
+            all_module_names,
+        ) {
+            Ok((full_list, added)) => {
+                if !added.is_empty() {
+                    log_fn(&format!("  → 自动补充依赖模块: [{}]", added.join(", ")));
+                }
+                (full_list, added)
+            }
+            Err(e) => {
+                // 依赖分析失败不阻断构建，降级为仅复制选中模块
+                log_fn(&format!("  ⚠ 依赖分析失败（{}），仅复制选中模块", e));
+                (selected_modules.to_vec(), Vec::new())
+            }
+        }
+    };
+    log_fn(&format!(
+        "✓ 依赖分析完成：共 {} 个模块（选中 {} + 自动补充 {}）",
+        expanded_modules.len(),
+        selected_modules.len(),
+        auto_added.len()
+    ));
+
+    // 5. 创建模块子目录并复制扩展后的模块列表
+    log_fn(&format!("→ 复制模块: {}", expanded_modules.join(", ")));
     let modules_dest = temp_dir.join(modules_dir_name);
     std::fs::create_dir_all(&modules_dest)
         .map_err(|e| AppError::BuildError(format!("无法创建 {} 目录: {}", modules_dir_name, e)))?;
 
     let mut skipped_modules: Vec<String> = Vec::new();
-    for module_name in selected_modules {
+    for module_name in &expanded_modules {
         let module_src = project_path.join(modules_dir_name).join(module_name);
         let module_dst = modules_dest.join(module_name);
 
         if module_src.is_dir() {
-            copy_dir_recursive(&module_src, &module_dst)?;
-            log_fn(&format!("  ✓ {}", module_name));
+            crate::services::packer::copy_dir_recursive(&module_src, &module_dst)?;
+            let tag = if auto_added.contains(module_name) { " (依赖)" } else { "" };
+            log_fn(&format!("  ✓ {}{}", module_name, tag));
         } else {
-            // 风险点6：模块目录不存在时记录警告而非静默跳过
-            log::warn!(
-                "选中的模块目录不存在，已跳过: {}",
-                module_src.display()
-            );
+            log::warn!("选中的模块目录不存在，已跳过: {}", module_src.display());
             skipped_modules.push(module_name.clone());
             log_fn(&format!("  ⚠ 跳过不存在的模块: {}", module_name));
         }
     }
 
-    // 如果所有选中模块都不存在，视为构建失败
-    if skipped_modules.len() == selected_modules.len() {
+    // 如果所有模块都不存在，视为构建失败
+    if skipped_modules.len() == expanded_modules.len() {
         return Err(AppError::BuildError(
             "所有选中的模块目录均不存在，无法构建".to_string(),
         ));
     }
 
-    // 风险点3：大量文件时记录警告日志
+    // 大量文件时记录警告日志
     let file_count = walkdir::WalkDir::new(&temp_dir).into_iter().count();
     if file_count > 5000 {
         log::warn!(
@@ -284,19 +312,18 @@ pub fn build_common_with_log(
         );
     }
 
-    // 6. 重写入口文件中的模块导入（仅保留选中模块的 import 和 router 注册）
-    // 根据技术栈获取对应的重写器，不支持的技术栈自动跳过
+    // 6. 重写入口文件中的模块导入（仅保留扩展后模块列表的 import 和 router 注册）
     if let Some(rewriter) = module_rewriter::get_rewriter(strategy.tech_stack()) {
         log_fn("→ 重写入口文件 import...");
         module_rewriter::process_entry_file(
             rewriter.as_ref(),
             &temp_dir,
-            selected_modules,
+            &expanded_modules,
             modules_dir_name,
         )?;
         log_fn("✓ import 重写完成");
 
-        // 6.5 校验重写后的入口文件导入完整性
+        // 校验重写后的入口文件导入完整性
         log_fn("→ 校验导入完整性...");
         module_rewriter::validate_entry_file(
             rewriter.as_ref(),
@@ -311,13 +338,19 @@ pub fn build_common_with_log(
     create_zip_from_dir(&temp_dir, &zip_path)?;
     log_fn("✓ ZIP 打包完成");
 
-    // 8. 返回构建结果（实际打包的模块数 = 选中数 - 跳过数）
-    let module_count = selected_modules.len() - skipped_modules.len();
+    // 8. 返回构建结果（实际打包的模块数 = 扩展后总数 - 跳过数）
+    let module_count = expanded_modules.len() - skipped_modules.len();
+    // 过滤掉跳过的模块，返回实际打包的完整模块列表
+    let actual_modules: Vec<String> = expanded_modules
+        .into_iter()
+        .filter(|m| !skipped_modules.contains(m))
+        .collect();
 
     Ok(BuildResult {
         zip_path: zip_path.to_string_lossy().to_string(),
         client_name: client_name.trim().to_string(),
         module_count,
+        expanded_modules: actual_modules,
     })
 }
 
@@ -328,8 +361,9 @@ fn build_common(
     selected_modules: &[String],
     client_name: &str,
     modules_dir_override: &str,
+    all_module_names: &[String],
 ) -> AppResult<BuildResult> {
-    build_common_with_log(strategy, project_path, selected_modules, client_name, modules_dir_override, &|_| {})
+    build_common_with_log(strategy, project_path, selected_modules, client_name, modules_dir_override, all_module_names, &|_| {})
 }
 
 // ============================================================================
@@ -411,7 +445,8 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string(), "users".to_string()];
-        let result = builder.build(dir.path(), &modules, "测试客户", "").unwrap();
+        let all_modules = vec!["auth".to_string(), "billing".to_string(), "users".to_string()];
+        let result = builder.build(dir.path(), &modules, "测试客户", "", &all_modules).unwrap();
 
         assert_eq!(result.client_name, "测试客户");
         assert_eq!(result.module_count, 2);
@@ -420,6 +455,7 @@ mod tests {
         assert!(zip_path.exists());
 
         let entries = read_zip_entries(zip_path);
+        // 骨架复制应包含 main.py、config/、core/、utils/ 等
         assert!(entries.iter().any(|n| n == "main.py"));
         assert!(entries.iter().any(|n| n.starts_with("modules/auth")));
         assert!(entries.iter().any(|n| n.starts_with("modules/users")));
@@ -435,7 +471,8 @@ mod tests {
 
         let builder = Vue3BuildStrategy;
         let modules = vec!["dashboard".to_string(), "login".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户B", "").unwrap();
+        let all_modules = vec!["dashboard".to_string(), "login".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户B", "", &all_modules).unwrap();
 
         assert_eq!(result.client_name, "客户B");
         assert_eq!(result.module_count, 2);
@@ -455,14 +492,12 @@ mod tests {
     fn test_get_builder_fastapi() {
         let builder = get_builder("fastapi");
         assert!(builder.is_ok());
-        assert!(builder.unwrap().core_files().contains(&"main.py"));
     }
 
     #[test]
     fn test_get_builder_vue3() {
         let builder = get_builder("vue3");
         assert!(builder.is_ok());
-        assert!(builder.unwrap().core_files().contains(&"package.json"));
     }
 
     #[test]
@@ -478,7 +513,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string()];
-        let result = builder.build(dir.path(), &modules, "", "");
+        let result = builder.build(dir.path(), &modules, "", "", &[]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("客户名称不能为空"));
     }
@@ -490,7 +525,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules: Vec<String> = vec![];
-        let result = builder.build(dir.path(), &modules, "客户A", "");
+        let result = builder.build(dir.path(), &modules, "客户A", "", &[]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("至少需要选择一个模块"));
     }
@@ -502,7 +537,7 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["nonexistent_a".to_string(), "nonexistent_b".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A", "");
+        let result = builder.build(dir.path(), &modules, "客户A", "", &[]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("所有选中的模块目录均不存在"));
     }
@@ -515,7 +550,8 @@ mod tests {
         let builder = FastApiBuildStrategy;
         // "auth" 存在，"nonexistent" 不存在
         let modules = vec!["auth".to_string(), "nonexistent".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A", "").unwrap();
+        let all_modules = vec!["auth".to_string(), "billing".to_string(), "users".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户A", "", &all_modules).unwrap();
         // 实际打包的模块数应为 1（跳过了不存在的模块）
         assert_eq!(result.module_count, 1);
         assert_eq!(result.client_name, "客户A");
@@ -542,7 +578,8 @@ mod tests {
 
         let builder = FastApiBuildStrategy;
         let modules = vec!["auth".to_string()];
-        let result = builder.build(dir.path(), &modules, "客户A", "").unwrap();
+        let all_modules = vec!["auth".to_string(), "billing".to_string(), "users".to_string()];
+        let result = builder.build(dir.path(), &modules, "客户A", "", &all_modules).unwrap();
 
         // ZIP 路径应包含时间戳（dist_客户A_yyyyMMdd_HHmmss.zip）
         assert!(result.zip_path.contains("dist_客户A_"));

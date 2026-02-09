@@ -274,7 +274,8 @@ export function useBuildData() {
         });
         if (lastModulesJson) {
           const lastModules: string[] = JSON.parse(lastModulesJson);
-          const currentModules = Array.from(selectedModules);
+          // 使用实际打包的完整模块列表（含依赖）进行对比
+          const currentModules = result.expanded_modules;
           const added = currentModules.filter((m) => !lastModules.includes(m));
           const removed = lastModules.filter((m) => !currentModules.includes(m));
           const parts: string[] = [];
@@ -286,12 +287,12 @@ export function useBuildData() {
         // 变更日志生成失败不阻断流程
       }
 
-      // 持久化构建记录（含版本号和变更日志）
+      // 持久化构建记录（使用实际打包的完整模块列表，含依赖分析自动补充的模块）
       appendLog("→ 保存构建记录...");
       await invoke("db_create_build_record", {
         projectId: selectedProject.id,
         clientId: client.id,
-        modulesJson: JSON.stringify(Array.from(selectedModules)),
+        modulesJson: JSON.stringify(result.expanded_modules),
         outputPath: result.zip_path,
         version,
         changelog,

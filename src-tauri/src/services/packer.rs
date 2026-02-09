@@ -132,6 +132,100 @@ pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> AppResult<()> {
 
     Ok(())
 }
+/// 复制项目目录到目标路径，排除指定的目录名
+///
+/// 用于构建时复制项目骨架：复制除 modules_dir 和忽略目录以外的所有文件。
+/// 采用"排除法"替代"白名单法"，确保不遗漏任何核心文件。
+///
+/// # 参数
+/// - `src`: 源项目根目录
+/// - `dst`: 目标构建目录
+/// - `exclude_dirs`: 需要排除的目录名列表（如 `[".git", "node_modules", "modules"]`）
+pub fn copy_dir_excluding(src: &Path, dst: &Path, exclude_dirs: &[&str]) -> AppResult<()> {
+    std::fs::create_dir_all(dst).map_err(|e| {
+        AppError::BuildError(format!("无法创建目标目录 {}: {}", dst.display(), e))
+    })?;
+
+    for entry in walkdir::WalkDir::new(src)
+        .into_iter()
+        .filter_entry(|e| {
+            // 只对目录做排除判断，文件始终保留
+            if e.file_type().is_dir() {
+                if let Some(name) = e.file_name().to_str() {
+                    // 精确匹配或前缀匹配（如 "dist_" 匹配 "dist_客户A_20260209"）
+                    for pattern in exclude_dirs {
+                        if pattern.ends_with('_') {
+                            // 前缀匹配模式
+                            if name.starts_with(pattern) {
+                                return false;
+                            }
+                        } else if pattern.starts_with("*.") {
+                            // 通配符模式（如 "*.egg-info"）跳过，仅用于文件
+                            continue;
+                        } else if name == *pattern {
+                            return false;
+                        }
+                    }
+                }
+            } else {
+                // 文件级排除：处理通配符模式和精确文件名匹配
+                if let Some(name) = e.file_name().to_str() {
+                    for pattern in exclude_dirs {
+                        if pattern.starts_with("*.") {
+                            // 通配符后缀匹配（如 "*.egg-info"、"*.zip"）
+                            let suffix = &pattern[1..]; // ".egg-info"
+                            if name.ends_with(suffix) {
+                                return false;
+                            }
+                        } else if pattern.starts_with('.') && name == *pattern {
+                            // 精确匹配隐藏文件（如 ".env"、".env.local"）
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        })
+    {
+        let entry = entry.map_err(|e| {
+            AppError::BuildError(format!("遍历项目目录失败: {}", e))
+        })?;
+
+        let relative = entry.path().strip_prefix(src).map_err(|e| {
+            AppError::BuildError(format!("路径处理失败: {}", e))
+        })?;
+
+        // 跳过根目录本身
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        let target = dst.join(relative);
+
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| {
+                AppError::BuildError(format!("无法创建目录 {}: {}", target.display(), e))
+            })?;
+        } else {
+            // 确保父目录存在
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    AppError::BuildError(format!("无法创建目录 {}: {}", parent.display(), e))
+                })?;
+            }
+            std::fs::copy(entry.path(), &target).map_err(|e| {
+                AppError::BuildError(format!(
+                    "无法复制 {} → {}: {}",
+                    entry.path().display(),
+                    target.display(),
+                    e
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
 
 
 // ============================================================================

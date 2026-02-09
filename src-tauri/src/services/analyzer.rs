@@ -959,8 +959,207 @@ fn detect_entry_files(entries: &[FileEntry]) -> Vec<String> {
     }
     found
 }
+// ============================================================================
+// 模块依赖解析（构建时传递依赖分析）
+// ============================================================================
 
+/// 分析选中模块的传递依赖，返回完整的模块集合（含原始选中 + 被依赖的模块）
+///
+/// 使用 BFS 遍历模块间的 import 关系，自动发现交叉依赖。
+/// 例如：选中 `orders`，但 `orders` 内部 `from modules.auth.models import User`，
+/// 则 `auth` 会被自动加入依赖集合。
+///
+/// # 参数
+/// - `project_path`: 项目根目录
+/// - `modules_dir`: 模块所在目录（相对路径，如 "modules"、"src/views"）
+/// - `selected_modules`: 用户选中的模块名列表
+/// - `all_module_names`: 项目中所有可用的模块名列表（用于判断 import 目标是否为项目模块）
+///
+/// # 返回
+/// - `Ok(Vec<String>)`: 完整的模块列表（去重、排序）
+/// - `Err(String)`: 分析失败的错误描述
+pub fn resolve_module_dependencies(
+    project_path: &Path,
+    modules_dir: &str,
+    selected_modules: &[String],
+    all_module_names: &[String],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let all_modules_set: HashSet<&str> = all_module_names.iter().map(|s| s.as_str()).collect();
 
+    // BFS 队列：从选中模块开始
+    let mut queue: std::collections::VecDeque<String> = selected_modules.iter().cloned().collect();
+    let mut visited: HashSet<String> = selected_modules.iter().cloned().collect();
+    // 记录自动补充的依赖模块（不在原始选中列表中的）
+    let mut auto_added: Vec<String> = Vec::new();
+    let selected_set: HashSet<&str> = selected_modules.iter().map(|s| s.as_str()).collect();
+
+    while let Some(module_name) = queue.pop_front() {
+        let module_path = project_path.join(modules_dir).join(&module_name);
+        if !module_path.is_dir() {
+            continue;
+        }
+
+        // 扫描该模块目录下的所有代码文件
+        let deps = scan_module_imports(&module_path, modules_dir, &all_modules_set)?;
+
+        for dep in deps {
+            if !visited.contains(&dep) {
+                visited.insert(dep.clone());
+                queue.push_back(dep.clone());
+                if !selected_set.contains(dep.as_str()) {
+                    auto_added.push(dep);
+                }
+            }
+        }
+    }
+
+    // 返回完整模块列表（排序保证确定性）
+    let mut full_list: Vec<String> = visited.into_iter().collect();
+    full_list.sort();
+    auto_added.sort();
+
+    Ok((full_list, auto_added))
+}
+
+/// 扫描单个模块目录内的所有代码文件，提取对其他模块的引用
+///
+/// 支持的 import 模式：
+/// - Python: `from {modules_dir}.xxx import ...` / `from {modules_dir} import xxx`
+/// - JS/TS: `import ... from '@/{modules_dir}/xxx/...'` / `import('@/{modules_dir}/xxx/...')`
+fn scan_module_imports(
+    module_path: &Path,
+    modules_dir: &str,
+    all_modules: &HashSet<&str>,
+) -> Result<HashSet<String>, String> {
+    let mut deps: HashSet<String> = HashSet::new();
+
+    // Python import 前缀：modules_dir 中的 "/" 替换为 "."
+    let py_prefix = modules_dir.replace('/', ".");
+    // Vue3/JS import 前缀
+    let vue_prefix = format!("@/{}", modules_dir.strip_prefix("src/").unwrap_or(modules_dir));
+
+    for entry in walkdir::WalkDir::new(module_path)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.file_type().is_dir() {
+                if let Some(name) = e.file_name().to_str() {
+                    return !["__pycache__", "node_modules", ".git"].contains(&name);
+                }
+            }
+            true
+        })
+    {
+        let entry = entry.map_err(|e| format!("遍历模块目录失败: {}", e))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+        // 只处理代码文件
+        if !["py", "ts", "tsx", "js", "jsx", "vue"].contains(&ext) {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // 跳过注释
+            if trimmed.starts_with('#') || trimmed.starts_with("//") {
+                continue;
+            }
+
+            // Python: from {prefix}.xxx... import ...
+            if trimmed.starts_with("from ") {
+                if let Some(module) = extract_module_ref_from_python(trimmed, &py_prefix) {
+                    if all_modules.contains(module.as_str()) {
+                        deps.insert(module);
+                    }
+                }
+            }
+
+            // Python: import {prefix}.xxx...
+            if trimmed.starts_with("import ") && !trimmed.contains(" from ") {
+                if let Some(module) = extract_module_ref_from_python_import(trimmed, &py_prefix) {
+                    if all_modules.contains(module.as_str()) {
+                        deps.insert(module);
+                    }
+                }
+            }
+
+            // JS/TS: import ... from '@/views/xxx/...' 或 import('@/views/xxx/...')
+            if trimmed.contains(&vue_prefix) {
+                if let Some(module) = extract_module_ref_from_js(trimmed, &vue_prefix) {
+                    if all_modules.contains(module.as_str()) {
+                        deps.insert(module);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(deps)
+}
+
+/// 从 Python `from {prefix}.xxx... import ...` 语句中提取模块名
+fn extract_module_ref_from_python(line: &str, prefix: &str) -> Option<String> {
+    let after_from = line.strip_prefix("from ")?.trim_start();
+    let import_pos = after_from.find(" import ")?;
+    let module_path = after_from[..import_pos].trim();
+
+    // 匹配 {prefix}.xxx 或 {prefix}.xxx.yyy
+    let after_prefix = module_path.strip_prefix(prefix)?.strip_prefix('.')?;
+    let module_name = match after_prefix.find('.') {
+        Some(pos) => &after_prefix[..pos],
+        None => after_prefix,
+    };
+
+    if module_name.is_empty() {
+        return None;
+    }
+    Some(module_name.to_string())
+}
+
+/// 从 Python `import {prefix}.xxx...` 语句中提取模块名
+fn extract_module_ref_from_python_import(line: &str, prefix: &str) -> Option<String> {
+    let after_import = line.strip_prefix("import ")?.trim_start();
+    let module_path = after_import.split(|c: char| c == ',' || c == ' ').next()?;
+
+    let after_prefix = module_path.strip_prefix(prefix)?.strip_prefix('.')?;
+    let module_name = match after_prefix.find('.') {
+        Some(pos) => &after_prefix[..pos],
+        None => after_prefix,
+    };
+
+    if module_name.is_empty() {
+        return None;
+    }
+    Some(module_name.to_string())
+}
+
+/// 从 JS/TS import 语句中提取模块名
+///
+/// 匹配 `@/views/xxx/...` 中的 `xxx`
+fn extract_module_ref_from_js(line: &str, vue_prefix: &str) -> Option<String> {
+    let pos = line.find(vue_prefix)?;
+    let after = &line[pos + vue_prefix.len()..];
+    let after = after.strip_prefix('/')?;
+
+    // 取第一个 "/" 或引号之前的部分
+    let end = after.find(|c: char| c == '/' || c == '\'' || c == '"').unwrap_or(after.len());
+    let module_name = &after[..end];
+
+    if module_name.is_empty() {
+        return None;
+    }
+    Some(module_name.to_string())
+}
 
 #[cfg(test)]
 mod tests {
