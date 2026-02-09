@@ -36,7 +36,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDOEUzQjVGNzFFNDE5RDYKUldUV0dlUnhYenVPWEU4RDNRWjQ0VXNTOUtXU09ZSjB3Y3o1WVMzZ2xmSE9aQU9sYnp1Ly9TQVUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhBQzk0RjJEMUMyNTk1ODAKUldTQWxTVWNMVS9KaW9rYklTR1RabTdReW1MU1Myc0V3ZUxkMkNhTXB5TmNHeTlWN2NkNzVYc1MK",
       "endpoints": [
         "https://github.com/alanbulan/prism-delivery-console/releases/latest/download/latest.json"
       ]
