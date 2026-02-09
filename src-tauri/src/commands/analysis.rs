@@ -218,7 +218,12 @@ pub async fn analyze_file_summary(
         return Err("请先在设置页面配置 LLM API 地址和模型".to_string());
     }
 
-    // 2. 读取文件内容
+    // 2. 路径安全校验：防止路径遍历攻击
+    if file_path.contains("..") {
+        return Err(format!("非法文件路径（包含 ..）: {}", file_path));
+    }
+
+    // 3. 读取文件内容
     let abs_path = std::path::Path::new(&project_path).join(&file_path);
     let content = std::fs::read_to_string(&abs_path)
         .map_err(|e| format!("读取文件失败 {}: {}", file_path, e))?;
@@ -461,7 +466,9 @@ pub async fn embed_all_files(
                 .map_err(|e| format!("保存 Embedding 失败：{}", e))?;
                 success_count += 1;
             }
-            Err(_) => {
+            Err(e) => {
+                // 记录具体失败原因，便于排查
+                log::warn!("Embedding 生成失败 [{}]: {}", file_path, e);
                 fail_count += 1;
             }
         }

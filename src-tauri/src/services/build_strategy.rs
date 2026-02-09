@@ -167,6 +167,36 @@ fn timestamp_suffix() -> String {
     )
 }
 
+/// 获取指定路径所在磁盘的可用空间（字节）
+///
+/// 使用 Windows GetDiskFreeSpaceExW API。失败时返回 0（不阻断构建）。
+#[cfg(target_os = "windows")]
+fn fs_available_space(path: &Path) -> u64 {
+    use std::os::windows::ffi::OsStrExt;
+    // 将路径转为宽字符（UTF-16），以 null 结尾
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_bytes: u64 = 0;
+    // 安全：调用 Windows API，传入有效的 null 结尾宽字符串
+    unsafe {
+        extern "system" {
+            fn GetDiskFreeSpaceExW(
+                lpDirectoryName: *const u16,
+                lpFreeBytesAvailableToCaller: *mut u64,
+                lpTotalNumberOfBytes: *mut u64,
+                lpTotalNumberOfFreeBytes: *mut u64,
+            ) -> i32;
+        }
+        GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_bytes, std::ptr::null_mut(), std::ptr::null_mut());
+    }
+    free_bytes
+}
+
+/// 非 Windows 平台的磁盘空间检查（返回 0 跳过检查）
+#[cfg(not(target_os = "windows"))]
+fn fs_available_space(_path: &Path) -> u64 {
+    0
+}
+
 /// 带日志回调的通用构建流程（V2：排除式骨架 + 依赖分析）
 ///
 /// 构建流程：
@@ -209,6 +239,25 @@ pub fn build_common_with_log(
     let dist_name = format!("dist_{}_{}", client_name.trim(), ts);
     let temp_dir = project_path.join(&dist_name);
     let zip_path = project_path.join(format!("{}.zip", dist_name));
+
+    // 磁盘空间预检：确保可用空间 > 项目目录大小的 2 倍（骨架复制 + ZIP 打包）
+    if let Ok(entries) = std::fs::read_dir(project_path) {
+        // 快速估算项目大小（仅统计一级目录，避免深度遍历耗时）
+        let estimated_size: u64 = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.metadata().ok())
+            .map(|m| m.len())
+            .sum();
+        // 使用 Windows API 获取磁盘可用空间
+        let available = fs_available_space(project_path);
+        if available > 0 && estimated_size > 0 && available < estimated_size * 2 {
+            return Err(AppError::BuildError(format!(
+                "磁盘可用空间不足：需要约 {} MB，当前可用 {} MB",
+                estimated_size * 2 / 1024 / 1024,
+                available / 1024 / 1024
+            )));
+        }
+    }
 
     // 2. 创建临时目录
     std::fs::create_dir_all(&temp_dir)
