@@ -3,7 +3,7 @@
 // 纯 Rust 函数，不依赖 tauri::*，方便单元测试
 // ============================================================================
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use crate::utils::error::{AppError, AppResult};
@@ -109,11 +109,20 @@ pub fn create_zip_from_dir(src_dir: &Path, zip_path: &Path) -> AppResult<()> {
             zip_writer
                 .start_file(&zip_entry_name, options)
                 .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 添加文件失败: {}", e)))?;
-            let content = std::fs::read(path)
+            // 流式写入：分块读取文件，避免大文件一次性加载到内存
+            let mut file = std::fs::File::open(path)
                 .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 读取文件失败: {}", e)))?;
-            zip_writer
-                .write_all(&content)
-                .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 写入文件失败: {}", e)))?;
+            let mut buf = [0u8; 64 * 1024]; // 64KB 缓冲区
+            loop {
+                let n = file.read(&mut buf)
+                    .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 读取文件失败: {}", e)))?;
+                if n == 0 {
+                    break;
+                }
+                zip_writer
+                    .write_all(&buf[..n])
+                    .map_err(|e| AppError::BuildError(format!("打包 ZIP 时出错 - 写入文件失败: {}", e)))?;
+            }
         }
     }
 

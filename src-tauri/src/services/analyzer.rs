@@ -5,6 +5,7 @@
 // ============================================================================
 
 use regex::Regex;
+use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::Path;
@@ -37,6 +38,8 @@ const IGNORED_DIRS: &[&str] = &[
 
 /// 递归遍历项目目录，计算每个文件的 SHA256 哈希
 ///
+/// 使用 rayon 并行计算文件哈希，大幅提升大型项目的扫描速度。
+///
 /// # 参数
 /// - `project_path`: 项目根目录路径
 ///
@@ -48,7 +51,8 @@ pub fn scan_project_files(project_path: &Path) -> Result<Vec<FileEntry>, String>
         return Err(format!("项目路径不存在：{}", project_path.display()));
     }
 
-    let mut entries = Vec::new();
+    // 第一步：收集所有文件路径（单线程遍历目录树）
+    let mut file_paths: Vec<(String, std::path::PathBuf)> = Vec::new();
 
     for entry in WalkDir::new(project_path)
         .into_iter()
@@ -69,7 +73,7 @@ pub fn scan_project_files(project_path: &Path) -> Result<Vec<FileEntry>, String>
             continue;
         }
 
-        let abs_path = entry.path();
+        let abs_path = entry.path().to_path_buf();
 
         // 计算相对路径
         let relative = abs_path
@@ -78,16 +82,22 @@ pub fn scan_project_files(project_path: &Path) -> Result<Vec<FileEntry>, String>
             .to_string_lossy()
             .replace('\\', "/"); // 统一使用正斜杠
 
-        // 计算文件 SHA256 哈希
-        let hash = compute_file_hash(abs_path)?;
-
-        entries.push(FileEntry {
-            relative_path: relative,
-            file_hash: hash,
-        });
+        file_paths.push((relative, abs_path));
     }
 
-    Ok(entries)
+    // 第二步：使用 rayon 并行计算所有文件的 SHA256 哈希
+    let entries: Result<Vec<FileEntry>, String> = file_paths
+        .par_iter()
+        .map(|(relative, abs_path)| {
+            let hash = compute_file_hash(abs_path)?;
+            Ok(FileEntry {
+                relative_path: relative.clone(),
+                file_hash: hash,
+            })
+        })
+        .collect();
+
+    entries
 }
 
 /// 计算单个文件的 SHA256 哈希值

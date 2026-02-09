@@ -199,6 +199,8 @@ impl Database {
                 project_id INTEGER NOT NULL,
                 file_path TEXT NOT NULL,
                 file_hash TEXT NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                mtime INTEGER NOT NULL DEFAULT 0,
                 summary TEXT,
                 signatures TEXT,
                 embedding BLOB,
@@ -365,6 +367,27 @@ impl Database {
                     "ALTER TABLE file_index ADD COLUMN signatures TEXT;",
                 )
                 .map_err(|e| format!("数据库迁移失败：添加 signatures 列时出错: {}", e))?;
+            }
+
+            // 检查 file_index 表是否缺少 file_size 列（增量哈希缓存用）
+            let has_file_size: bool = conn
+                .prepare("PRAGMA table_info(file_index)")
+                .and_then(|mut stmt| {
+                    let cols: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(cols.contains(&"file_size".to_string()))
+                })
+                .unwrap_or(false);
+
+            if !has_file_size {
+                conn.execute_batch(
+                    "ALTER TABLE file_index ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
+                     ALTER TABLE file_index ADD COLUMN mtime INTEGER NOT NULL DEFAULT 0;",
+                )
+                .map_err(|e| format!("数据库迁移失败：添加 file_size/mtime 列时出错: {}", e))?;
             }
         }
 

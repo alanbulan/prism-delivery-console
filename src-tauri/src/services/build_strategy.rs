@@ -7,7 +7,8 @@
 // 新增技术栈只需添加新的 struct + impl，无需修改现有代码（OCP 原则）。
 
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use time::OffsetDateTime;
 
 use crate::models::dtos::BuildResult;
 use crate::services::packer::{copy_dir_recursive, create_zip_from_dir, validate_build_params};
@@ -149,58 +150,19 @@ impl BuildStrategy for Vue3BuildStrategy {
 // ============================================================================
 
 /// 生成时间戳后缀（格式：yyyyMMdd_HHmmss）
+///
+/// 使用 `time` crate 替代手写日历算法，更可靠且可维护（KISS 原则）
 fn timestamp_suffix() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // 简易 UTC 时间格式化，避免引入 chrono 依赖（KISS 原则）
-    let secs_per_day = 86400u64;
-    let secs_per_hour = 3600u64;
-    let secs_per_min = 60u64;
-
-    let days = now / secs_per_day;
-    let time_of_day = now % secs_per_day;
-    let hour = time_of_day / secs_per_hour;
-    let minute = (time_of_day % secs_per_hour) / secs_per_min;
-    let second = time_of_day % secs_per_min;
-
-    // 从 Unix 纪元天数计算年月日
-    let (year, month, day) = days_to_ymd(days);
-    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", year, month, day, hour, minute, second)
-}
-
-/// 将 Unix 纪元天数转换为 (年, 月, 日)
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    // 简化的公历算法（足够满足时间戳需求）
-    let mut y = 1970u64;
-    let mut remaining = days;
-    loop {
-        let days_in_year = if is_leap(y) { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let months_days: [u64; 12] = if is_leap(y) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut m = 1u64;
-    for &md in &months_days {
-        if remaining < md {
-            break;
-        }
-        remaining -= md;
-        m += 1;
-    }
-    (y, m, remaining + 1)
-}
-
-fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}_{:02}{:02}{:02}",
+        now.year(),
+        now.month() as u8,
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
 }
 
 /// 带日志回调的通用构建流程
